@@ -28,8 +28,11 @@ class ClipboardD(plugin.MenuItem):
         item = Gtk.MenuItem.new_with_label("Clipboard Paste")
         item.connect('activate', self._show_window)
         menulist.append(item)
-
-    # Shows/creates the plugin window
+        for terminal in Terminator().terminals:
+            # Connect key-press-event to the VTE widget of each terminal
+            terminal.vte.connect("key-press-event", self._on_vte_key_press)
+            
+    
     def _show_window(self, menu_item=None, *args):
         if self._window and self._window.is_visible():
             self._window.present()
@@ -47,8 +50,6 @@ class ClipboardD(plugin.MenuItem):
         text_entry.set_wrap_mode(Gtk.WrapMode.WORD)
         
         scrolled_window = Gtk.ScrolledWindow()
-        scrolled_window.set_hexpand(True)
-        scrolled_window.set_vexpand(True)
         scrolled_window.add(text_entry)
         vbox.pack_start(scrolled_window, True, True, 0)
         
@@ -81,26 +82,23 @@ class ClipboardD(plugin.MenuItem):
     def _on_vte_key_press(self, vte_widget, event):
         if self._window and self._window.is_visible():
             return False # Window already open, don't interfere
-
-        # Example: F8 to open the window (no modifiers)
         if event.keyval == Gdk.KEY_F9:
-            # Find the Terminal object that owns this vte_widget
             for term in Terminator().terminals:
                 if term.vte == vte_widget:
                     self._target_terminal = term # Set target if opened via keypress
                     break
-            
             if self._target_terminal:
                 self._show_window()
                 return True # Event handled
         return False # Let other handlers process
-
-    # Key press handler for PLUGIN WINDOW (to SEND content)
     def _on_window_key_press(self, widget, event):
         # Example: F9 or Alt+Enter to send content
-        if event.keyval == Gdk.KEY_F9 or \
-           (event.keyval == Gdk.KEY_Return and (event.state & Gdk.ModifierType.ALT_MASK)):
-            self._send_content()
+        if event.keyval == Gdk.KEY_F9 
+#           (event.keyval == Gdk.KEY_Return and (event.state & Gdk.ModifierType.ALT_MASK)):
+            if (event.keyval == Gdk.KEY_F9 and (event.state & Gdk.ModifierType.ALT_MASK)):
+                debug("send one line")
+            elif:
+                self._send_content()
             return True
         return False
 
