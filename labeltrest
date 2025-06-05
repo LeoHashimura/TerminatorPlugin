@@ -1,4 +1,100 @@
--*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
+
+# --------------------------------------------------------------------------
+# 警告: Python 2.7 はサポート終了 (EOL) しており、新規開発には推奨されません。
+# 新しい開発には Python 3.x の使用を強くお勧めします。
+# --------------------------------------------------------------------------
+
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Gdk
+import random
+
+class DynamicColoredSignalsWindow(Gtk.Window):
+    def __init__(self):
+        Gtk.Window.__init__(self, title="Dynamic Colored Signals")
+        self.set_default_size(300, 300)
+        self.set_border_width(10)
+        self.connect("destroy", Gtk.main_quit) # ウィンドウを閉じたら終了
+
+        main_vbox = Gtk.VBox(spacing=10)
+        self.add(main_vbox)
+
+        # 表示するラベルの数をここで指定
+        NUM_LABELS = 5 
+        
+        # 各シグナルの状態 (Gtk.Labelオブジェクトと現在のON/OFF状態) を格納するリスト
+        # [(label_obj, is_on_boolean), ...] の形式
+        self.signal_elements = [] 
+
+        # --- ラベルの初期生成 ---
+        for i in range(NUM_LABELS):
+            # 初期状態をランダムに決定
+            is_on_initial = random.random() > 0.5
+            
+            text = "Signal %d: %s" % (i + 1, "ON" if is_on_initial else "OFF")
+            
+            # ラベルの作成
+            label = Gtk.Label(text)
+            label.set_halign(Gtk.Align.START) # 左揃え
+            label.set_size_request(200, 30) # 最小サイズを設定
+
+            # EventBoxでラップしてパディングを設ける
+            event_box = Gtk.EventBox()
+            event_box.add(label)
+            event_box.set_border_width(5) # パディング
+            
+            # 初期色を適用
+            self._apply_label_color(label, is_on_initial)
+            
+            main_vbox.pack_start(event_box, False, False, 0) # VBoxに追加
+
+            # ラベルの参照と現在の状態をリストに保存
+            self.signal_elements.append({'label': label, 'is_on': is_on_initial})
+
+        # --- 色を切り替えるボタン ---
+        toggle_button = Gtk.Button("シグナル状態を切り替え")
+        toggle_button.connect("clicked", self.on_toggle_button_clicked)
+        main_vbox.pack_start(toggle_button, False, False, 0)
+
+    def _apply_label_color(self, label, is_on):
+        """ラベルにON/OFF状態に応じた色を適用するヘルパーメソッド"""
+        fg_color = Gdk.RGBA(1.0, 1.0, 1.0, 1.0) # 白
+        if is_on:
+            bg_color = Gdk.RGBA(0.0, 0.6, 0.0, 1.0) # 緑
+        else:
+            bg_color = Gdk.RGBA(0.6, 0.0, 0.0, 1.0) # 赤
+
+        label.override_color(Gtk.StateFlags.NORMAL, fg_color)
+        label.override_background_color(Gtk.StateFlags.NORMAL, bg_color)
+        # 変更がすぐに反映されるよう、再描画をキューに入れる
+        label.queue_draw()
+
+    def on_toggle_button_clicked(self, widget):
+        """'シグナル状態を切り替え'ボタンがクリックされた時のコールバック"""
+        print "シグナル状態を切り替え中..."
+        for element in self.signal_elements:
+            current_label = element['label']
+            current_is_on = element['is_on']
+            
+            # 状態を反転
+            new_is_on = not current_is_on
+            element['is_on'] = new_is_on # 状態を更新
+            
+            # ラベルのテキストも更新
+            current_label.set_text("Signal %s: %s" % (
+                current_label.get_text().split(':')[0].split(' ')[1], # "Signal N" の N 部分を取得
+                "ON" if new_is_on else "OFF"
+            ))
+            
+            # 新しい状態に応じた色を適用
+            self._apply_label_color(current_label, new_is_on)
+
+# アプリケーションのエントリーポイント
+if __name__ == "__main__":
+    win = DynamicColoredSignalsWindow()
+    win.show_all() # 全てのウィジェットを表示
+    Gtk.main() # GTKイベントループを開始*- coding: utf-8 -*-
 
 # --------------------------------------------------------------------------
 # 警告: Python 2.7 はサポート終了 (EOL) しており、新規開発には推奨されません。
