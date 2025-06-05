@@ -1,0 +1,55 @@
+-*- coding: utf-8 -*-
+
+# --------------------------------------------------------------------------
+# 警告: Python 2.7 はサポート終了 (EOL) しており、新規開発には推奨されません。
+# 新しい開発には Python 3.x の使用を強くお勧めします。
+# --------------------------------------------------------------------------
+
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Gdk
+import random
+
+class FixedSignalsWindow(Gtk.Window):
+    def __init__(self):
+        Gtk.Window.__init__(self, title="Fixed Colored Signals")
+        self.set_default_size(300, 250)
+        self.set_border_width(10)
+        self.connect("destroy", Gtk.main_quit) # ウィンドウを閉じたら終了
+
+        # ラベルを配置する垂直ボックス
+        main_vbox = Gtk.VBox(spacing=5)
+        self.add(main_vbox)
+
+        # 表示するラベルの数をここで指定
+        NUM_LABELS = 5 
+
+        # 指定された数のラベルを作成し、追加
+        for i in range(NUM_LABELS):
+            is_on = random.random() > 0.5
+            text = "Signal %d: %s" % (i + 1, "ON" if is_on else "OFF")
+            
+            # 前景色（白）
+            fg_color = Gdk.RGBA(1.0, 1.0, 1.0, 1.0) 
+            # 背景色（ONなら緑、OFFなら赤）
+            bg_color = Gdk.RGBA(0.0, 0.6, 0.0, 1.0) if is_on else Gdk.RGBA(0.6, 0.0, 0.0, 1.0) 
+
+            # ラベルの作成とスタイリング
+            label = Gtk.Label(text)
+            label.set_halign(Gtk.Align.START) # 左揃え
+            label.set_size_request(200, 30) # 最小サイズ
+            label.override_color(Gtk.StateFlags.NORMAL, fg_color)
+            label.override_background_color(Gtk.StateFlags.NORMAL, bg_color)
+            
+            # ラベルの周りにパディングを設けるためEventBoxでラップ
+            event_box = Gtk.EventBox()
+            event_box.add(label)
+            event_box.set_border_width(5) # パディング
+            
+            main_vbox.pack_start(event_box, False, False, 0) # VBoxに追加
+
+# アプリケーションのエントリーポイント
+if __name__ == "__main__":
+    win = FixedSignalsWindow()
+    win.show_all() # 全てのウィジェットを表示
+    Gtk.main() # GTKイベントループを開始
