@@ -1,0 +1,50 @@
+host_01.example.com,192.168.1.1,user_01,Password:,pass_01
+host_02.example.com,192.168.1.2,user_02,Password:,pass_02,Verification code:,code_02
+host_03.example.com,192.168.1.3,user_03,Password:,pass_03
+host_04.example.com,192.168.1.4,user_04,Password:,pass_04,Verification code:,code_04
+host_05.example.com,192.168.1.5,user_05,Password:,pass_05
+host_06.example.com,192.168.1.6,user_06,Password:,pass_06,Verification code:,code_06
+host_07.example.com,192.168.1.7,user_07,Password:,pass_07
+host_08.example.com,192.168.1.8,user_08,Password:,pass_08,Verification code:,code_08
+host_09.example.com,192.168.1.9,user_09,Password:,pass_09
+host_10.example.com,192.168.1.10,user_10,Password:,pass_10,Verification code:,code_10
+host_11.example.com,192.168.1.11,user_11,Password:,pass_11
+host_12.example.com,192.168.1.12,user_12,Password:,pass_12,Verification code:,code_12
+host_13.example.com,192.168.1.13,user_13,Password:,pass_13
+host_14.example.com,192.168.1.14,user_14,Password:,pass_14,Verification code:,code_14
+host_15.example.com,192.168.1.15,user_15,Password:,pass_15
+host_16.example.com,192.168.1.16,user_16,Password:,pass_16,Verification code:,code_16
+host_17.example.com,192.168.1.17,user_17,Password:,pass_17
+host_18.example.com,192.168.1.18,user_18,Password:,pass_18,Verification code:,code_18
+host_19.example.com,192.168.1.19,user_19,Password:,pass_19
+host_20.example.com,192.168.1.20,user_20,Password:,pass_20,Verification code:,code_20
+host_21.example.com,192.168.1.21,user_21,Password:,pass_21
+host_22.example.com,192.168.1.22,user_22,Password:,pass_22,Verification code:,code_22
+host_23.example.com,192.168.1.23,user_23,Password:,pass_23
+host_24.example.com,192.168.1.24,user_24,Password:,pass_24,Verification code:,code_24
+host_25.example.com,192.168.1.25,user_25,Password:,pass_25
+host_26.example.com,192.168.1.26,user_26,Password:,pass_26,Verification code:,code_26
+host_27.example.com,192.168.1.27,user_27,Password:,pass_27
+host_28.example.com,192.168.1.28,user_28,Password:,pass_28,Verification code:,code_28
+host_29.example.com,192.168.1.29,user_29,Password:,pass_29
+host_30.example.com,192.168.1.30,user_30,Password:,pass_30,Verification code:,code_30
+host_31.example.com,192.168.1.31,user_31,Password:,pass_31
+host_32.example.com,192.168.1.32,user_32,Password:,pass_32,Verification code:,code_32
+host_33.example.com,192.168.1.33,user_33,Password:,pass_33
+host_34.example.com,192.168.1.34,user_34,Password:,pass_34,Verification code:,code_34
+host_35.example.com,192.168.1.35,user_35,Password:,pass_35
+host_36.example.com,192.168.1.36,user_36,Password:,pass_36,Verification code:,code_36
+host_37.example.com,192.168.1.37,user_37,Password:,pass_37
+host_38.example.com,192.168.1.38,user_38,Password:,pass_38,Verification code:,code_38
+host_39.example.com,192.168.1.39,user_39,Password:,pass_39
+host_40.example.com,192.168.1.40,user_40,Password:,pass_40,Verification code:,code_40
+host_41.example.com,192.168.1.41,user_41,Password:,pass_41
+host_42.example.com,192.168.1.42,user_42,Password:,pass_42,Verification code:,code_42
+host_43.example.com,192.168.1.43,user_43,Password:,pass_43
+host_44.example.com,192.168.1.44,user_44,Password:,pass_44,Verification code:,code_44
+host_45.example.com,192.168.1.45,user_45,Password:,pass_45
+host_46.example.com,192.168.1.46,user_46,Password:,pass_46,Verification code:,code_46
+host_47.example.com,192.168.1.47,user_47,Password:,pass_47
+host_48.example.com,192.168.1.48,user_48,Password:,pass_48,Verification code:,code_48
+host_49.example.com,192.168.1.49,user_49,Password:,pass_49
+host_50.example.com,192.168.1.50,user_50,Password:,pass_50,Verification code:,code_50
