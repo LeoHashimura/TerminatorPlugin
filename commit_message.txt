@@ -1,0 +1,6 @@
+feat: Implement LDAP credential prompting and config persistence
+
+- Modified `_get_default_host_from_terminator_config` to read and write `default_prompt` and `default_response` separately, addressing the issue of combined prompt/response strings.
+- Implemented `_prompt_for_ldap_credentials` to display a GTK dialog for user input of LDAP ID and password.
+- Integrated the prompting mechanism into `_get_default_host_from_terminator_config` to ask for credentials if they are not found in the Terminator config.
+- Updated debug messages for clarity and consistency.

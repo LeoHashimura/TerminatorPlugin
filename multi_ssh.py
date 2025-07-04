@@ -26,8 +26,21 @@ class MultiSSH(plugin.MenuItem):
 
     def _get_default_host_from_terminator_config(self):
         conf = config.Config()
-        section = 'plugins:multi_ssh'
+        plugin_name = self.__class__.__name__
+        config_key = "default_host"
+
+        # Get plugin config.
+        plugin_config = conf.plugin_get_config(plugin_name)
         
+        # Ensure plugin_config is a dictionary
+        if not isinstance(plugin_config, dict):
+            plugin_config = {}
+
+        # Get the defaults dictionary for our plugin, or an empty dict
+        defaults = plugin_config.get(config_key, {})
+        if not isinstance(defaults, dict): # Handle data corruption
+            defaults = {}
+
         # Default values
         default_hostname = 'Revice'
         default_ip_address = '172.221.20.21'
@@ -35,33 +48,36 @@ class MultiSSH(plugin.MenuItem):
         default_prompt = 'assword:'
         default_response = 'ldapPASS'
 
-        # Ensure the section exists
-        if not conf.has_section(section):
-            conf.add_section(section)
-            conf.set(section, 'default_hostname', default_hostname)
-            conf.set(section, 'default_ip_address', default_ip_address)
-            conf.set(section, 'default_username', default_username)
-            conf.set(section, 'default_prompt', default_prompt)
-            conf.set(section, 'default_response', default_response)
-            conf.save()
-            dbg("MultiSSH: デフォルトホスト設定をTerminatorコンフィグに書き込みました。これにより、設定の永続性が確保されます。")
-        
-        # Read values from config
-        hostname = conf.get(section, 'default_hostname', default_hostname)
-        ip_address = conf.get(section, 'default_ip_address', default_ip_address)
-        username = conf.get(section, 'default_username', '') # Read as empty string if not set
-        prompt = conf.get(section, 'default_prompt', '')
-        response = conf.get(section, 'default_response', '')
+        # Load values from config, falling back to defaults
+        hostname = defaults.get('default_hostname', default_hostname)
+        ip_address = defaults.get('default_ip_address', default_ip_address)
+        username = defaults.get('default_username', default_username)
+        prompt = defaults.get('default_prompt', default_prompt)
+        response = defaults.get('default_response', default_response)
 
         # If username or prompts are blank, ask the user
         if not username or not prompt or not response:
-            username, prompt, response = self._prompt_for_ldap_credentials(conf, section)
-            # Update config with new values
-            conf.set(section, 'default_username', username)
-            conf.set(section, 'default_prompt', prompt)
-            conf.set(section, 'default_response', response)
+            new_username, new_prompt, new_response = self._prompt_for_ldap_credentials()
+            if new_username and new_prompt and new_response:
+                username = new_username
+                prompt = new_prompt
+                response = new_response
+                dbg("MultiSSH: ユーザー入力に基づいてデフォルトホスト設定を更新しました。")
+
+        # Consolidate the final values
+        final_defaults = {
+            'default_hostname': hostname,
+            'default_ip_address': ip_address,
+            'default_username': username,
+            'default_prompt': prompt,
+            'default_response': response,
+        }
+
+        # Save the consolidated config back if it's different from what we loaded
+        if final_defaults != defaults:
+            conf.plugin_set(plugin_name, config_key, final_defaults)
             conf.save()
-            dbg("MultiSSH: ユーザー入力に基づいてデフォルトホスト設定を更新しました。")
+            dbg("MultiSSH: Terminatorコンフィグを更新/保存しました。")
 
         # Parse prompts string
         prompts = []
@@ -75,7 +91,7 @@ class MultiSSH(plugin.MenuItem):
             'prompts': prompts
         }
 
-    def _prompt_for_ldap_credentials(self, conf, section):
+    def _prompt_for_ldap_credentials(self):
         dialog = Gtk.Dialog("LDAP認証情報の入力", None, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
                             (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                              Gtk.STOCK_OK, Gtk.ResponseType.OK))
@@ -110,15 +126,8 @@ class MultiSSH(plugin.MenuItem):
         if response == Gtk.ResponseType.OK:
             ldap_id = self.ldap_id_entry.get_text()
             ldap_pass = self.ldap_pass_entry.get_text()
-            
-            # Save to config immediately
-            conf.set(section, 'default_username', ldap_id)
-            conf.set(section, 'default_prompt', 'assword:') # Assuming this is constant
-            conf.set(section, 'default_response', ldap_pass)
-            conf.save()
-            dbg("MultiSSH: LDAP認証情報をTerminatorコンフィグに保存しました。これにより、次回の入力は不要となります。")
         else:
-            dbg("MultiSSH: LDAP認証情報の入力がキャンセルされました。デフォルトホストへのログインはできません。")
+            dbg("MultiSSH: LDAP認証情報の入力がキャンセルされました。")
 
         dialog.destroy()
         return ldap_id, 'assword:', ldap_pass

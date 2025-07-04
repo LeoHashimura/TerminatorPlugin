@@ -12,7 +12,8 @@ class Menutest(plugin.MenuItem):
    capabilities = ['terminal_menu']
    config = None
    SENDLINE = "ls"
-   WAITTXT = "$"
+   WAITTXT = ".*\$$"
+   cmdarray = ([[],[]])
    bl_match = False
    def __init__(self):
       plugin.MenuItem.__init__(self)

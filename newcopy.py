@@ -44,7 +44,7 @@ class ClipboardD(plugin.MenuItem):
         window.add(vbox)
 
         text_entry = Gtk.TextView()
-        text_entry.set_wrap_mode(Gtk.WrapMode.WORD)
+        text_entry.set_wrap_mode(Gtk.WrapMode.CHAR)
         
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_hexpand(True)
