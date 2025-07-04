@@ -32,7 +32,8 @@ class MultiSSH(plugin.MenuItem):
         default_hostname = 'Revice'
         default_ip_address = '172.221.20.21'
         default_username = 'ldapID'
-        default_prompts_str = 'assword:ldapPASS' # Stored as a single string, prompt:response
+        default_prompt = 'assword:'
+        default_response = 'ldapPASS'
 
         # Ensure the section exists
         if not conf.has_section(section):
@@ -40,24 +41,32 @@ class MultiSSH(plugin.MenuItem):
             conf.set(section, 'default_hostname', default_hostname)
             conf.set(section, 'default_ip_address', default_ip_address)
             conf.set(section, 'default_username', default_username)
-            conf.set(section, 'default_prompts', default_prompts_str)
+            conf.set(section, 'default_prompt', default_prompt)
+            conf.set(section, 'default_response', default_response)
             conf.save()
             dbg("MultiSSH: デフォルトホスト設定をTerminatorコンフィグに書き込みました。これにより、設定の永続性が確保されます。")
         
         # Read values from config
         hostname = conf.get(section, 'default_hostname', default_hostname)
         ip_address = conf.get(section, 'default_ip_address', default_ip_address)
-        username = conf.get(section, 'default_username', default_username)
-        prompts_str = conf.get(section, 'default_prompts', default_prompts_str)
+        username = conf.get(section, 'default_username', '') # Read as empty string if not set
+        prompt = conf.get(section, 'default_prompt', '')
+        response = conf.get(section, 'default_response', '')
+
+        # If username or prompts are blank, ask the user
+        if not username or not prompt or not response:
+            username, prompt, response = self._prompt_for_ldap_credentials(conf, section)
+            # Update config with new values
+            conf.set(section, 'default_username', username)
+            conf.set(section, 'default_prompt', prompt)
+            conf.set(section, 'default_response', response)
+            conf.save()
+            dbg("MultiSSH: ユーザー入力に基づいてデフォルトホスト設定を更新しました。")
 
         # Parse prompts string
         prompts = []
-        if prompts_str:
-            parts = prompts_str.split(':')
-            if len(parts) == 2:
-                prompts.append({'prompt': parts[0], 'response': parts[1]})
-            else:
-                dbg("MultiSSH: デフォルトプロンプトの形式が不適切です。'prompt:response'の厳格な遵守が求められます。")
+        if prompt and response:
+            prompts.append({'prompt': prompt, 'response': response})
 
         return {
             'hostname': hostname,
@@ -65,6 +74,54 @@ class MultiSSH(plugin.MenuItem):
             'username': username,
             'prompts': prompts
         }
+
+    def _prompt_for_ldap_credentials(self, conf, section):
+        dialog = Gtk.Dialog("LDAP認証情報の入力", None, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                             Gtk.STOCK_OK, Gtk.ResponseType.OK))
+        dialog.set_default_size(300, 150)
+        dialog.set_border_width(10)
+
+        content_area = dialog.get_content_area()
+        grid = Gtk.Grid()
+        grid.set_row_spacing(5)
+        grid.set_column_spacing(5)
+        content_area.add(grid)
+
+        ldap_id_label = Gtk.Label("LDAP ID:")
+        self.ldap_id_entry = Gtk.Entry()
+        self.ldap_id_entry.set_width_chars(30)
+        grid.attach(ldap_id_label, 0, 0, 1, 1)
+        grid.attach(self.ldap_id_entry, 1, 0, 1, 1)
+
+        ldap_pass_label = Gtk.Label("LDAP Password:")
+        self.ldap_pass_entry = Gtk.Entry()
+        self.ldap_pass_entry.set_visibility(False) # Hide password
+        self.ldap_pass_entry.set_width_chars(30)
+        grid.attach(ldap_pass_label, 0, 1, 1, 1)
+        grid.attach(self.ldap_pass_entry, 1, 1, 1, 1)
+
+        dialog.show_all()
+        response = dialog.run()
+
+        ldap_id = ""
+        ldap_pass = ""
+
+        if response == Gtk.ResponseType.OK:
+            ldap_id = self.ldap_id_entry.get_text()
+            ldap_pass = self.ldap_pass_entry.get_text()
+            
+            # Save to config immediately
+            conf.set(section, 'default_username', ldap_id)
+            conf.set(section, 'default_prompt', 'assword:') # Assuming this is constant
+            conf.set(section, 'default_response', ldap_pass)
+            conf.save()
+            dbg("MultiSSH: LDAP認証情報をTerminatorコンフィグに保存しました。これにより、次回の入力は不要となります。")
+        else:
+            dbg("MultiSSH: LDAP認証情報の入力がキャンセルされました。デフォルトホストへのログインはできません。")
+
+        dialog.destroy()
+        return ldap_id, 'assword:', ldap_pass
 
     def callback(self, menuitems, menu, terminal):
         self.current_terminal = terminal  # Store the terminal that opened the menu
@@ -156,7 +213,7 @@ class MultiSSH(plugin.MenuItem):
                 self._login_to_host(self.current_terminal, host_info)
                 window.destroy()
             else:
-            dbg("MultiSSH: SSHセッションを開始するターミナルが見当たりません。これは予期せぬ事態です。")
+                dbg("MultiSSH: SSHセッションを開始するターミナルが見当たりません。これは予期せぬ事態です。")
         else:
             dbg("MultiSSH: ホストが選択されていません。選択は、行動の第一歩です。")
 
