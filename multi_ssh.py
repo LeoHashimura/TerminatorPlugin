@@ -55,8 +55,8 @@ class MultiSSH(plugin.MenuItem):
         prompt = defaults.get('default_prompt', default_prompt)
         response = defaults.get('default_response', default_response)
 
-        # If username or prompts are blank, ask the user
-        if not username or not prompt or not response:
+        # If the loaded username is the default placeholder, or if any value is blank, ask the user
+        if username == default_username or not username or not prompt or not response:
             new_username, new_prompt, new_response = self._prompt_for_ldap_credentials()
             if new_username and new_prompt and new_response:
                 username = new_username
@@ -93,40 +93,28 @@ class MultiSSH(plugin.MenuItem):
 
     def _prompt_for_ldap_credentials(self):
         dialog = Gtk.Dialog("LDAP認証情報の入力", None, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
-                            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-                             Gtk.STOCK_OK, Gtk.ResponseType.OK))
+                            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK))
         dialog.set_default_size(300, 150)
         dialog.set_border_width(10)
 
-        content_area = dialog.get_content_area()
-        grid = Gtk.Grid()
-        grid.set_row_spacing(5)
-        grid.set_column_spacing(5)
-        content_area.add(grid)
+        grid = Gtk.Grid(row_spacing=5, column_spacing=5)
+        dialog.get_content_area().add(grid)
 
-        ldap_id_label = Gtk.Label("LDAP ID:")
-        self.ldap_id_entry = Gtk.Entry()
-        self.ldap_id_entry.set_width_chars(30)
-        grid.attach(ldap_id_label, 0, 0, 1, 1)
-        grid.attach(self.ldap_id_entry, 1, 0, 1, 1)
+        grid.attach(Gtk.Label("LDAP ID:"), 0, 0, 1, 1)
+        ldap_id_entry = Gtk.Entry(width_chars=30)
+        grid.attach(ldap_id_entry, 1, 0, 1, 1)
 
-        ldap_pass_label = Gtk.Label("LDAP Password:")
-        self.ldap_pass_entry = Gtk.Entry()
-        self.ldap_pass_entry.set_visibility(False) # Hide password
-        self.ldap_pass_entry.set_width_chars(30)
-        grid.attach(ldap_pass_label, 0, 1, 1, 1)
-        grid.attach(self.ldap_pass_entry, 1, 1, 1, 1)
+        grid.attach(Gtk.Label("LDAP Password:"), 0, 1, 1, 1)
+        ldap_pass_entry = Gtk.Entry(width_chars=30, visibility=False)
+        grid.attach(ldap_pass_entry, 1, 1, 1, 1)
 
         dialog.show_all()
         response = dialog.run()
 
-        ldap_id = ""
-        ldap_pass = ""
-
-        if response == Gtk.ResponseType.OK:
-            ldap_id = self.ldap_id_entry.get_text()
-            ldap_pass = self.ldap_pass_entry.get_text()
-        else:
+        ldap_id = ldap_id_entry.get_text() if response == Gtk.ResponseType.OK else ""
+        ldap_pass = ldap_pass_entry.get_text() if response == Gtk.ResponseType.OK else ""
+        
+        if response != Gtk.ResponseType.OK:
             dbg("MultiSSH: LDAP認証情報の入力がキャンセルされました。")
 
         dialog.destroy()
