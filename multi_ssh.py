@@ -155,11 +155,51 @@ class MultiSSH(plugin.MenuItem):
             dbg("MultiSSH: hosts.csv の読み込み中に予期せぬ事態が発生しました: {}".format(e))
         return hosts
 
+    def _get_recent_hosts(self):
+        conf = config.Config()
+        plugin_name = self.__class__.__name__
+        plugin_config = conf.plugin_get_config(plugin_name)
+        if not isinstance(plugin_config, dict):
+            plugin_config = {}
+        
+        recent_hosts = plugin_config.get('recent_hosts', [])
+        
+        # Ensure we have a list of dictionaries and filter out any invalid entries
+        if isinstance(recent_hosts, list):
+            return [h for h in recent_hosts if isinstance(h, dict)]
+        
+        return []  # Return empty list if the config value is not a list
+
+    def _add_to_recent_hosts(self, host_info):
+        if host_info.get('hostname') == 'Revice':
+            return  # Do not add the default host to recent list
+
+        conf = config.Config()
+        plugin_name = self.__class__.__name__
+        plugin_config = conf.plugin_get_config(plugin_name)
+        if not isinstance(plugin_config, dict):
+            plugin_config = {}
+        
+        recent_hosts = self._get_recent_hosts() # Use the sanitized getter
+        
+        # Avoid duplicates
+        recent_hosts = [h for h in recent_hosts if h['hostname'] != host_info['hostname']]
+        
+        # Add to the top
+        recent_hosts.insert(0, host_info)
+        
+        # Keep only the last 5
+        plugin_config['recent_hosts'] = recent_hosts[:5]
+        
+        conf.plugin_set(plugin_name, 'recent_hosts', plugin_config['recent_hosts'])
+        conf.save()
+
     def _show_host_selection_window(self, menu_item, *args):
         self.hosts_data = self._read_hosts_from_csv()
+        recent_hosts = self._get_recent_hosts()
 
-        if not self.hosts_data:
-            dbg("MultiSSH: hosts.csv にはホスト情報が見当たらず、ウィンドウ表示は保留されます。".format(csv_path))
+        if not self.hosts_data and not recent_hosts:
+            dbg("MultiSSH: hosts.csv にはホスト情報が見当たらず、ウィンドウ表示は保留されます。")
             return
 
         window = Gtk.Window(title="SSH接続先のホストを選択")
@@ -170,8 +210,16 @@ class MultiSSH(plugin.MenuItem):
         window.add(vbox)
 
         store = Gtk.ListStore(str, str, object)
-        for host_info in self.hosts_data:
+
+        # Add recent hosts
+        for host_info in recent_hosts:
             store.append([host_info['hostname'], host_info['ip_address'], host_info])
+
+        # Add hosts from csv
+        for host_info in self.hosts_data:
+            # Avoid adding duplicates that are already in recent_hosts
+            if not any(h['hostname'] == host_info['hostname'] for h in recent_hosts):
+                store.append([host_info['hostname'], host_info['ip_address'], host_info])
 
         treeview = Gtk.TreeView(model=store)
         treeview.set_headers_visible(True)
@@ -195,7 +243,7 @@ class MultiSSH(plugin.MenuItem):
         login_button.connect("clicked", self._on_login_button_clicked, treeview, window)
         vbox.pack_start(login_button, False, False, 0)
 
-        default_login_button = Gtk.Button(label="デフォルトホストにログイン")
+        default_login_button = Gtk.Button(label="踏み台にログイン")
         default_login_button.connect("clicked", self._on_default_login_button_clicked, window)
         vbox.pack_start(default_login_button, False, False, 0)
 
@@ -206,7 +254,7 @@ class MultiSSH(plugin.MenuItem):
         model, treeiter = selection.get_selected()
         if treeiter:
             host_info = model.get_value(treeiter, 2)
-            if self.current_terminal:
+            if host_info and self.current_terminal:
                 self._login_to_host(self.current_terminal, host_info)
                 window.destroy()
             else:
@@ -222,11 +270,17 @@ class MultiSSH(plugin.MenuItem):
         else:
             dbg("MultiSSH: SSHセッションを開始するターミナルが見当たりません。これは予期せぬ事態です。")
 
-    def _wait_for_prompt_and_send_response(self, terminal, host_info, prompt_index, start_time, timeout_seconds=10):
+    def _wait_for_prompt_and_send_response(self, terminal, host_info, prompt_state, start_time, timeout_seconds=10):
+        prompt_index = prompt_state['index']
+
+        # All prompts handled, stop polling.
+        if prompt_index >= len(host_info['prompts']):
+            return False
+
         current_time = GObject.get_current_time()
         if (current_time - start_time) / 1000000 > timeout_seconds:
             dbg("MultiSSH: ターミナル {} でのプロンプト待機がタイムアウトしました。応答なきは沈黙に勝る。".format(terminal.uuid))
-            return False
+            return False  # Stop polling on timeout
 
         vte = self._get_vte(terminal)
         text = vte.get_text_range(0, 0, vte.get_column_count(), vte.get_row_count(), None)[0]
@@ -239,22 +293,18 @@ class MultiSSH(plugin.MenuItem):
                     last_line = line.strip()
                     break
 
-        if prompt_index < len(host_info['prompts']):
-            current_prompt_data = host_info['prompts'][prompt_index]
-            prompt_text = current_prompt_data['prompt']
-            response_text = current_prompt_data['response']
+        current_prompt_data = host_info['prompts'][prompt_index]
+        prompt_text = current_prompt_data['prompt']
+        response_text = current_prompt_data['response']
 
-            # Check if the prompt is at the end of the last non-empty line
-            if last_line.endswith(prompt_text):
-                dbg("MultiSSH: ターミナル {} にて、カスタムプロンプト '{}' を認識。'{}' を以て応じます。".format(terminal.uuid, prompt_text, response_text))
-                vte.feed_child("{}\n".format(response_text).encode('utf-8'))
-                prompt_index += 1
-                if prompt_index < len(host_info['prompts']):
-                    return True
-                else:
-                    return False
+        # Check if the prompt is at the end of the last non-empty line
+        if last_line.endswith(prompt_text):
+            dbg("MultiSSH: ターミナル {} にて、カスタムプロンプト '{}' を認識。'{}' を以て応じます。".format(terminal.uuid, prompt_text, response_text))
+            vte.feed_child("{}\n".format(response_text).encode('utf-8'))
+            prompt_state['index'] += 1  # Move to the next prompt
 
-        return False
+        # Continue polling
+        return True
 
     def _login_to_host(self, terminal, host_info):
         hostname = host_info['hostname']
@@ -267,6 +317,10 @@ class MultiSSH(plugin.MenuItem):
         vte = self._get_vte(terminal)
         vte.feed_child(ssh_command.encode('utf-8'))
         dbg("MultiSSH: {} へSSHコマンドを発行しました。接続の確立を試みます。".format(target_address))
+        
+        self._add_to_recent_hosts(host_info)
 
         start_time = GObject.get_current_time()
-        GObject.timeout_add(500, self._wait_for_prompt_and_send_response, terminal, host_info, 0, start_time)
+        # Use a mutable dictionary for prompt_state to track the prompt index across callbacks.
+        prompt_state = {'index': 0}
+        GObject.timeout_add(1500, self._wait_for_prompt_and_send_response, terminal, host_info, prompt_state, start_time)
