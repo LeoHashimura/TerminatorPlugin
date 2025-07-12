@@ -44,9 +44,9 @@ class MultiSSH(plugin.MenuItem):
         # Default values
         default_hostname = 'Revice'
         default_ip_address = '172.221.20.21'
-        default_username = 'ldapID'
+        default_username = 'ldapID'#仮
         default_prompt = 'assword:'
-        default_response = 'ldapPASS'
+        default_response = 'ldapPASS'#仮
 
         # Load values from config, falling back to defaults
         hostname = defaults.get('default_hostname', default_hostname)
@@ -55,14 +55,14 @@ class MultiSSH(plugin.MenuItem):
         prompt = defaults.get('default_prompt', default_prompt)
         response = defaults.get('default_response', default_response)
 
-        # If the loaded username is the default placeholder, or if any value is blank, ask the user
+        # If the loaded username is the default(正しくない) or if any value is blank, ask the user
         if username == default_username or not username or not prompt or not response:
             new_username, new_prompt, new_response = self._prompt_for_ldap_credentials()
             if new_username and new_prompt and new_response:
                 username = new_username
                 prompt = new_prompt
                 response = new_response
-                dbg("MultiSSH: ユーザー入力に基づいてデフォルトホスト設定を更新しました。")
+                dbg("MultiSSH: ldap情報更新。")
 
         # Consolidate the final values
         final_defaults = {
@@ -77,7 +77,7 @@ class MultiSSH(plugin.MenuItem):
         if final_defaults != defaults:
             conf.plugin_set(plugin_name, config_key, final_defaults)
             conf.save()
-            dbg("MultiSSH: Terminatorコンフィグを更新/保存しました。")
+            dbg("MultiSSH: Terminatorコンフィグに更新/保存しました。")
 
         # Parse prompts string
         prompts = []
@@ -132,7 +132,7 @@ class MultiSSH(plugin.MenuItem):
         csv_path = os.path.join(plugin_dir, "hosts.csv")
 
         if not os.path.exists(csv_path):
-            dbg("MultiSSH: hosts.csv が {} に見当たりません。存在の確認を要します。".format(csv_path))
+            dbg("MultiSSH: hosts.csv が {} を作ってください".format(csv_path))
             return hosts
 
         try:
@@ -150,7 +150,7 @@ class MultiSSH(plugin.MenuItem):
                             host_info['prompts'].append({'prompt': row[i], 'response': row[i+1]})
                         hosts.append(host_info)
                     else:
-                        dbg("MultiSSH: CSV行の解析に齟齬が生じました: {}。期待されるは、ホスト名、IPアドレス、ユーザー名に続き、プロンプトと応答の対です。".format(row))
+                        dbg("MultiSSH: CSVの構文エラー: {}。hostname, ipadress,ID,expected prompt,response,expected resp.... and so on".format(row))
         except Exception as e:
             dbg("MultiSSH: hosts.csv の読み込み中に予期せぬ事態が発生しました: {}".format(e))
         return hosts
@@ -164,15 +164,14 @@ class MultiSSH(plugin.MenuItem):
         
         recent_hosts = plugin_config.get('recent_hosts', [])
         
-        # Ensure we have a list of dictionaries and filter out any invalid entries
         if isinstance(recent_hosts, list):
             return [h for h in recent_hosts if isinstance(h, dict)]
         
-        return []  # Return empty list if the config value is not a list
+        return []  
 
     def _add_to_recent_hosts(self, host_info):
         if host_info.get('hostname') == 'Revice':
-            return  # Do not add the default host to recent list
+            return  #ここで　返すのか、そもそも呼ばないべきなのか。
 
         conf = config.Config()
         plugin_name = self.__class__.__name__
@@ -215,11 +214,9 @@ class MultiSSH(plugin.MenuItem):
         for host_info in recent_hosts:
             store.append([host_info['hostname'], host_info['ip_address'], host_info])
 
-        # Add hosts from csv
+        # Add hosts from csv 当初上記の最新5件は除いてましたが復活重複して載せることにしました。
         for host_info in self.hosts_data:
-            # Avoid adding duplicates that are already in recent_hosts
-            if not any(h['hostname'] == host_info['hostname'] for h in recent_hosts):
-                store.append([host_info['hostname'], host_info['ip_address'], host_info])
+            store.append([host_info['hostname'], host_info['ip_address'], host_info])
 
         treeview = Gtk.TreeView(model=store)
         treeview.set_headers_visible(True)
@@ -260,13 +257,13 @@ class MultiSSH(plugin.MenuItem):
             else:
                 dbg("MultiSSH: SSHセッションを開始するターミナルが見当たりません。これは予期せぬ事態です。")
         else:
-            dbg("MultiSSH: ホストが選択されていません。選択は、行動の第一歩です。")
+            dbg("MultiSSH: ホストが選択されていません。")
 
     def _on_default_login_button_clicked(self, button, window):
         default_host_info = self._get_default_host_from_terminator_config()
         if self.current_terminal:
             self._login_to_host(self.current_terminal, default_host_info)
-            window.destroy()
+            #window.destroy() #コメントアウト検討中
         else:
             dbg("MultiSSH: SSHセッションを開始するターミナルが見当たりません。これは予期せぬ事態です。")
 
@@ -299,7 +296,7 @@ class MultiSSH(plugin.MenuItem):
 
         # Check if the prompt is at the end of the last non-empty line
         if last_line.endswith(prompt_text):
-            dbg("MultiSSH: ターミナル {} にて、カスタムプロンプト '{}' を認識。'{}' を以て応じます。".format(terminal.uuid, prompt_text, response_text))
+            dbg("MultiSSH: ターミナル {} にて、カスタムプロンプト '{}' を認識。'{}' を出力".format(terminal.uuid, prompt_text, response_text))
             vte.feed_child("{}\n".format(response_text).encode('utf-8'))
             prompt_state['index'] += 1  # Move to the next prompt
 
@@ -311,9 +308,24 @@ class MultiSSH(plugin.MenuItem):
         username = host_info['username']
         ip_address = host_info['ip_address']
 
+        # Extract default LDAP credentials from config.
+        default_host_info = self._get_default_host_from_terminator_config()
+        default_id = default_host_info.get('username')
+        default_pw = None
+        if default_host_info.get('prompts'):
+            default_pw = default_host_info['prompts'][0].get('response')
+
+        # If username is "default", use the default credentials.
+        if username == "default":
+            username = default_id
+            # Also update the password response for the prompt.
+            if host_info.get('prompts') and default_pw is not None:
+                host_info['prompts'][0]['response'] = default_pw
+
         target_address = ip_address if ip_address else hostname
 
-        ssh_command = "ssh {}\n".format(target_address)
+        # Construct the SSH command with the username.
+        ssh_command = "ssh {}@{}".format(username, target_address)
         vte = self._get_vte(terminal)
         vte.feed_child(ssh_command.encode('utf-8'))
         dbg("MultiSSH: {} へSSHコマンドを発行しました。接続の確立を試みます。".format(target_address))
