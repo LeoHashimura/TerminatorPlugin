@@ -25,67 +25,76 @@ class MultiSSH(plugin.MenuItem):
         else:  # For Terminator 1.x
             return terminal.vte
 
-    def _get_plugin_config(self):
-        """Centralized method to get the plugin's config dictionary."""
-        conf = config.Config()
-        plugin_name = self.__class__.__name__
-        plugin_config = conf.plugin_get_config(plugin_name)
-        if not isinstance(plugin_config, dict):
-            return {}
-        return plugin_config
-
-    def _save_plugin_config_key(self, key, value):
-        """Centralized method to save a specific key to the plugin's config."""
-        conf = config.Config()
-        plugin_name = self.__class__.__name__
-        plugin_config = self._get_plugin_config()
-        plugin_config[key] = value
-        conf.plugin_set(plugin_name, None, plugin_config)
-        conf.save()
-
     def _get_default_host_from_terminator_config(self):
-        plugin_config = self._get_plugin_config()
+        conf = config.Config()
+        plugin_name = self.__class__.__name__
         config_key = "default_host"
+
+        # Get plugin config.
+        plugin_config = conf.plugin_get_config(plugin_name)
         
+        # Ensure plugin_config is a dictionary
+        if not isinstance(plugin_config, dict):
+            plugin_config = {}
+
+        # Get the defaults dictionary for our plugin, or an empty dict
         defaults = plugin_config.get(config_key, {})
-        if not isinstance(defaults, dict):
+        if not isinstance(defaults, dict): # Handle data corruption
             defaults = {}
 
+        # Default values
         default_hostname = 'Revice'
         default_ip_address = '172.221.20.21'
-        default_username = 'ldapID'
+        default_username = 'ldapID'#仮
         default_prompt = 'assword:'
-        default_response = 'ldapPASS'
+        default_response = 'ldapPASS'#仮
 
+        # Load values from config, falling back to defaults
         hostname = defaults.get('default_hostname', default_hostname)
         ip_address = defaults.get('default_ip_address', default_ip_address)
         username = defaults.get('default_username', default_username)
         prompt = defaults.get('default_prompt', default_prompt)
         response = defaults.get('default_response', default_response)
 
-        if username == default_username or not all([username, prompt, response]):
+        # If the loaded username is the default(正しくない) or if any value is blank, ask the user
+        if username == default_username or not username or not prompt or not response:
             new_username, new_prompt, new_response = self._prompt_for_ldap_credentials()
-            if all([new_username, new_prompt, new_response]):
-                username, prompt, response = new_username, new_prompt, new_response
-                dbg("MultiSSH: LDAP credentials updated by user.")
+            if new_username and new_prompt and new_response:
+                username = new_username
+                prompt = new_prompt
+                response = new_response
+                dbg("MultiSSH: ldap情報更新。")
 
+        # Consolidate the final values
         final_defaults = {
-            'default_hostname': hostname, 'default_ip_address': ip_address,
-            'default_username': username, 'default_prompt': prompt,
+            'default_hostname': hostname,
+            'default_ip_address': ip_address,
+            'default_username': username,
+            'default_prompt': prompt,
             'default_response': response,
         }
 
+        # Save the consolidated config back if it's different from what we loaded
         if final_defaults != defaults:
-            self._save_plugin_config_key(config_key, final_defaults)
-            dbg("MultiSSH: Default host config saved to Terminator.")
+            conf.plugin_set(plugin_name, config_key, final_defaults)
+            conf.save()
+            dbg("MultiSSH: Terminatorコンフィグに更新/保存しました。")
 
-        prompts = [{'prompt': prompt, 'response': response}] if prompt and response else []
+        # Parse prompts string
+        prompts = []
+        if prompt and response:
+            prompts.append({'prompt': prompt, 'response': response})
 
-        return {'hostname': hostname, 'ip_address': ip_address, 'username': username, 'prompts': prompts}
+        return {
+            'hostname': hostname,
+            'ip_address': ip_address,
+            'username': username,
+            'prompts': prompts
+        }
 
     def _prompt_for_ldap_credentials(self):
         dialog = Gtk.Dialog("LDAP認証情報の入力", None, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
-                            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK))
+                            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.ResponseType.OK, Gtk.ResponseType.OK))
         dialog.set_default_size(300, 150)
         dialog.set_border_width(10)
 
@@ -143,18 +152,50 @@ class MultiSSH(plugin.MenuItem):
         return hosts
 
     def _get_recent_hosts(self):
-        plugin_config = self._get_plugin_config()
+        conf = config.Config()
+        plugin_name = self.__class__.__name__
+        plugin_config = conf.plugin_get_config(plugin_name)
+        if not isinstance(plugin_config, dict):
+            plugin_config = {}
+        
         recent_hosts = plugin_config.get('recent_hosts', [])
-        return [h for h in recent_hosts if isinstance(h, dict)] if isinstance(recent_hosts, list) else []
+        
+        if isinstance(recent_hosts, list):
+            return [h for h in recent_hosts if isinstance(h, dict)]
+        
+        return []  
 
     def _add_to_recent_hosts(self, host_info):
         if host_info.get('hostname') == 'Revice':
             return
 
+        conf = config.Config()
+        plugin_name = self.__class__.__name__
+        plugin_config = conf.plugin_get_config(plugin_name)
+        if not isinstance(plugin_config, dict):
+            plugin_config = {}
+        
         recent_hosts = self._get_recent_hosts()
-        recent_hosts = [h for h in recent_hosts if h.get('hostname') != host_info.get('hostname')]
-        recent_hosts.insert(0, host_info)
-        self._save_plugin_config_key('recent_hosts', recent_hosts[:5])
+        
+        # Create a new dictionary with only the necessary data
+        new_host_info = {
+            'hostname': host_info.get('hostname'),
+            'ip_address': host_info.get('ip_address'),
+            'username': host_info.get('username'),
+            'prompts': host_info.get('prompts', [])
+        }
+
+        # Avoid duplicates
+        recent_hosts = [h for h in recent_hosts if h['hostname'] != new_host_info['hostname']]
+        
+        # Add to the top
+        recent_hosts.insert(0, new_host_info)
+        
+        # Keep only the last 5
+        plugin_config['recent_hosts'] = recent_hosts[:5]
+        
+        conf.plugin_set(plugin_name, 'recent_hosts', plugin_config['recent_hosts'])
+        conf.save()
 
     def _on_search_changed(self, search_entry, model_filter):
         search_text = search_entry.get_text().lower()
@@ -188,10 +229,10 @@ class MultiSSH(plugin.MenuItem):
         for host in recent_hosts:
             store.append([host['hostname'], host['ip_address'], host])
         for host in self.hosts_data:
-            if not any(h['hostname'] == host['hostname'] for h in recent_hosts):
-                store.append([host['hostname'], host['ip_address'], host])
+            store.append([host['hostname'], host['ip_address'], host])
 
         tree_model = store
+        search_entry = None
         try:
             search_entry = Gtk.SearchEntry()
             if hasattr(search_entry, 'set_placeholder_text'):
@@ -219,16 +260,16 @@ class MultiSSH(plugin.MenuItem):
         vbox.pack_start(scrolled_window, True, True, 0)
 
         login_button = Gtk.Button(label="選択したホストにログイン")
-        login_button.connect("clicked", self._on_login_button_clicked, treeview, window)
+        login_button.connect("clicked", self._on_login_button_clicked, treeview, window, search_entry)
         vbox.pack_start(login_button, False, False, 0)
 
         default_login_button = Gtk.Button(label="踏み台にログイン")
-        default_login_button.connect("clicked", self._on_default_login_button_clicked, window)
+        default_login_button.connect("clicked", self._on_default_login_button_clicked, window, search_entry)
         vbox.pack_start(default_login_button, False, False, 0)
 
         window.show_all()
 
-    def _on_login_button_clicked(self, button, treeview, window):
+    def _on_login_button_clicked(self, button, treeview, window, search_entry):
         selection = treeview.get_selection()
         model, treeiter = selection.get_selected()
         if treeiter:
@@ -240,29 +281,33 @@ class MultiSSH(plugin.MenuItem):
                 host_info = model.get_value(treeiter, 2)
             
             if host_info and self.current_terminal:
-                self._login_to_host(self.current_terminal, host_info)
-                window.destroy()
+                self._login_to_host(self.current_terminal, host_info, window, search_entry)
             else:
                 dbg("MultiSSH: Cannot start SSH session, terminal not found.")
         else:
             dbg("MultiSSH: No host selected.")
 
-    def _on_default_login_button_clicked(self, button, window):
+    def _on_default_login_button_clicked(self, button, window, search_entry):
         default_host_info = self._get_default_host_from_terminator_config()
         if self.current_terminal:
-            self._login_to_host(self.current_terminal, default_host_info)
+            self._login_to_host(self.current_terminal, default_host_info, window, search_entry)
         else:
             dbg("MultiSSH: Cannot start SSH session, terminal not found.")
 
-    def _wait_for_prompt_and_send_response(self, terminal, host_info, prompt_state, start_time, timeout_seconds=10):
+    def _wait_for_prompt_and_send_response(self, terminal, host_info, prompt_state, start_time, window, search_entry, timeout_seconds=10):
         prompt_index = prompt_state['index']
 
         if prompt_index >= len(host_info['prompts']):
+            if search_entry:
+                search_entry.set_text("Login successful!")
+            GObject.timeout_add(1000, window.destroy)
             terminal.multi_ssh_timeout_id = None
             return False
 
         current_time = GObject.get_current_time()
         if (current_time - start_time) / 1000000 > timeout_seconds:
+            if search_entry:
+                search_entry.set_text("Login timed out!")
             dbg("MultiSSH: Prompt wait timed out on terminal {}.".format(terminal.uuid))
             terminal.multi_ssh_timeout_id = None
             return False
@@ -275,6 +320,9 @@ class MultiSSH(plugin.MenuItem):
         prompt_text = current_prompt_data['prompt']
         response_text = current_prompt_data['response']
 
+        if search_entry:
+            search_entry.set_text("Waiting for prompt: '{}'".format(prompt_text))
+
         prompt_pattern = re.escape(prompt_text) + r'\s*$'
         if re.search(prompt_pattern, last_line):
             prompt_state['index'] += 1
@@ -286,7 +334,7 @@ class MultiSSH(plugin.MenuItem):
         
         return True
 
-    def _login_to_host(self, terminal, host_info):
+    def _login_to_host(self, terminal, host_info, window, search_entry):
         if hasattr(terminal, 'multi_ssh_timeout_id') and terminal.multi_ssh_timeout_id:
             GObject.source_remove(terminal.multi_ssh_timeout_id)
             dbg("MultiSSH: Stopped previous login process on terminal {}.".format(terminal.uuid))
@@ -313,4 +361,4 @@ class MultiSSH(plugin.MenuItem):
         if host_info.get('prompts'):
             start_time = GObject.get_current_time()
             prompt_state = {'index': 0}
-            terminal.multi_ssh_timeout_id = GObject.timeout_add(300, self._wait_for_prompt_and_send_response, terminal, host_info, prompt_state, start_time)
+            terminal.multi_ssh_timeout_id = GObject.timeout_add(500, self._wait_for_prompt_and_send_response, terminal, host_info, prompt_state, start_time, window, search_entry)
