@@ -1,152 +1,100 @@
 from gi.repository import Gtk, Gdk
-# Essential Terminator plugin imports
 from terminatorlib import plugin
 from terminatorlib.terminator import Terminator
-from terminatorlib.util import dbg # Keep dbg for minimal feedback
+from terminatorlib.util import dbg
 
-# Plugin name for Terminator to find
 AVAILABLE = ['ClipboardReviewPaste']
 
 class ClipboardReviewPaste(plugin.MenuItem):
     capabilities = ['terminal_menu']
-    
-    # Class-level attributes for the single window and textbox instance
+
     _window = None
     _text_entry = None
-    _target_terminal = None # The terminal to send content to
+    _target_terminal = None
 
     def __init__(self):
         plugin.MenuItem.__init__(self)
-        
-        # Connect to all terminals existing at plugin init
-        for terminal in Terminator().terminals:
-            # Connect key-press-event to the VTE widget of each terminal
-            terminal.vte.connect("key-press-event", self._on_vte_key_press)
+        dbg("ClipboardReviewPaste plugin loaded")
+        kb = Terminator().keybindings
+        kb.register_action("review_paste", self.review_paste)
+        try:
+            kb.bindkey("review_paste", "z")
+        except Exception as e:
+            dbg(f"Error binding key: {e}")
+
+    def review_paste(self, *args):
+        """Keybinding handler"""
+        dbg("Review Paste keybinding triggered!")
+        active_terminal = Terminator().get_focused_terminal()
+        if active_terminal:
+            self._show_window(None, active_terminal)
 
     def callback(self, menulist, menu, terminal):
-        self._target_terminal = terminal # Set target if opened via menu
+        """Adds the 'Clipboard Review Paste' menu item"""
         item = Gtk.MenuItem.new_with_label("Clipboard Review Paste")
-        item.connect('activate', self._show_window)
+        item.connect('activate', self._show_window, terminal)
         menulist.append(item)
 
-    # Shows/creates the plugin window
-    def _show_window(self, menu_item=None, *args):
+    def _show_window(self, menu_item, terminal):
+        """Shows/creates the plugin window"""
+        self._target_terminal = terminal
         if self._window and self._window.is_visible():
             self._window.present()
             self._update_clipboard_text()
             return
 
-        window = Gtk.Window(title='Clipboard Review')
-        window.set_default_size(300, 150) # Minimal default size
+        self._window = Gtk.Window(title='Clipboard Review')
+        self._window.set_default_size(500, 300)
+        self._window.connect("destroy", self._on_window_destroy)
+        self._window.connect("key-press-event", self._on_window_key_press)
 
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        vbox.set_border_width(6)
-        window.add(vbox)
+        vbox.set_border_width(12)
+        self._window.add(vbox)
 
-        text_entry = Gtk.TextView()
-        text_entry.set_wrap_mode(Gtk.WrapMode.WORD)
-        
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_hexpand(True)
         scrolled_window.set_vexpand(True)
-        scrolled_window.add(text_entry)
         vbox.pack_start(scrolled_window, True, True, 0)
-        
-        self._window = window
-        self._text_entry = text_entry
-        
-        window.connect("destroy", self._on_window_destroy)
-        window.connect("key-press-event", self._on_window_key_press) # Key to SEND content
 
-        window.show_all()
+        self._text_entry = Gtk.TextView()
+        self._text_entry.set_wrap_mode(Gtk.WrapMode.WORD)
+        scrolled_window.add(self._text_entry)
+
         self._update_clipboard_text()
+        self._window.show_all()
 
-    # Clears window/textbox references on destroy
     def _on_window_destroy(self, widget):
         self._window = None
         self._text_entry = None
 
-    # Requests clipboard content asynchronously
     def _update_clipboard_text(self):
         if self._text_entry:
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
             clipboard.request_text(self._on_clipboard_received)
 
-    # Callback for received clipboard text (used when showing the window)
     def _on_clipboard_received(self, clipboard, text):
         if self._text_entry:
             self._text_entry.get_buffer().set_text(text if text else "")
 
-    # Callback for Ctrl+Shift+V: decides whether to paste directly or show window
-    def _conditional_paste_or_show_window(self, clipboard, text, terminal):
-        if text:
-            if '\n' in text: # Check for multiple lines
-                dbg("ClipboardReviewPaste: Multiple lines detected. Showing review window.")
-                self._show_window() # Show window, it will fetch clipboard again
-            else:
-                dbg("ClipboardReviewPaste: Single line detected. Direct pasting.")
-                terminal.vte.feed_child((text + '\n').encode('utf-8'))
-        else:
-            dbg("ClipboardReviewPaste: Clipboard is empty for conditional paste.")
-
-    # Key press handler for TERMINAL VTE (to OPEN window)
-    def _on_vte_key_press(self, vte_widget, event):
-        if self._window and self._window.is_visible():
-            return False # Window already open, don't interfere
-
-        # Intercept Ctrl+Shift+V for conditional paste
-        if event.keyval == Gdk.KEY_v and \
-           (event.state & Gdk.ModifierType.CONTROL_MASK) and \
-           (event.state & Gdk.ModifierType.SHIFT_MASK):
-            # Find the Terminal object that owns this vte_widget
-            for term in Terminator().terminals:
-                if term.vte == vte_widget:
-                    self._target_terminal = term # Set target if opened via keypress
-                    break
-            
-            if self._target_terminal:
-                clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-                clipboard.request_text(self._conditional_paste_or_show_window, self._target_terminal)
-                return True # Event handled, stop propagation
-
-        # Keep F9 as an alternative hotkey
-        if event.keyval == Gdk.KEY_F9:
-            # Find the Terminal object that owns this vte_widget
-            for term in Terminator().terminals:
-                if term.vte == vte_widget:
-                    self._target_terminal = term # Set target if opened via keypress
-                    break
-            
-            if self._target_terminal:
-                self._show_window()
-                return True # Event handled
-        return False # Let other handlers process
-
-    # Key press handler for PLUGIN WINDOW (to SEND content)
     def _on_window_key_press(self, widget, event):
-        # Example: F9 or Alt+Enter to send content
         if event.keyval == Gdk.KEY_F9 or \
            (event.keyval == Gdk.KEY_Return and (event.state & Gdk.ModifierType.ALT_MASK)):
             self._send_content()
             return True
         return False
 
-    # Sends textbox content to the target terminal
     def _send_content(self):
         if not self._target_terminal or not self._text_entry:
-            dbg("self: No target terminal or textbox.")
+            dbg("Error: No target terminal or textbox.")
             return
 
-        text = self._text_entry.get_buffer().get_text(
-            self._text_entry.get_buffer().get_bounds()[0],
-            self._text_entry.get_buffer().get_bounds()[1],
-            False
-        )
+        buffer = self._text_entry.get_buffer()
+        text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
 
         if text:
-            self._target_terminal.vte.feed_child((text + '\n').encode('utf-8'))
-            dbg(f"self: Sent {len(text)} chars to terminal.")
+            self._target_terminal.vte.feed_child(text.encode('utf-8'))
             if self._window:
                 self._window.destroy()
         else:
-            dbg("ClipboardP: Textbox empty.")
+            dbg("ClipboardReviewPaste: Textbox empty.")
