@@ -338,7 +338,6 @@ class MultiSSH(plugin.MenuItem):
         if hasattr(terminal, 'multi_ssh_timeout_id') and terminal.multi_ssh_timeout_id:
             GObject.source_remove(terminal.multi_ssh_timeout_id)
             dbg("MultiSSH: Stopped previous login process on terminal {}.".format(terminal.uuid))
-        terminal.multi_ssh_timeout_id = None
 
         username = host_info['username']
         
