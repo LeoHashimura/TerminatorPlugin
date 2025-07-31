@@ -123,7 +123,7 @@ class MultiSSH(plugin.MenuItem):
 
     def callback(self, menuitems, menu, terminal):
         self.current_terminal = terminal
-        item = Gtk.MenuItem.new_with_label("Multi-SSH ログイン (ウィンドウ)")
+        item = Gtk.MenuItem.new_with_label("SSH 半自動ログイン")
         item.connect('activate', self._show_host_selection_window)
         menuitems.append(item)
 
