@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*
+# -*- coding: utf-8 -* 
 from __future__ import division
 import os
 import re
@@ -17,6 +17,7 @@ class MultiSSH(plugin.MenuItem):
         plugin.MenuItem.__init__(self)
         self.hosts_data = []
         self.current_terminal = None
+        self.search_text = ""
 
     def _get_vte(self, terminal):
         """Get the VTE in a version-independent way."""
@@ -197,18 +198,16 @@ class MultiSSH(plugin.MenuItem):
         conf.plugin_set(plugin_name, 'recent_hosts', plugin_config['recent_hosts'])
         conf.save()
 
-    def _on_search_changed(self, search_entry, model_filter):
-        search_text = search_entry.get_text().lower()
-        model_filter.set_data("search_text", search_text)
-        model_filter.refilter()
-
     def _filter_visible_func(self, model, treeiter, data):
-        search_text = data.get("search_text")
-        if not search_text:
+        if not self.search_text:
             return True
         hostname = model.get_value(treeiter, 0).lower()
         ip_address = model.get_value(treeiter, 1).lower()
-        return search_text in hostname or search_text in ip_address
+        return self.search_text in hostname or self.search_text in ip_address
+
+    def _on_search_changed(self, search_entry, model_filter):
+        self.search_text = search_entry.get_text().lower()
+        model_filter.refilter()
 
     def _show_host_selection_window(self, menu_item, *args):
         self.hosts_data = self._read_hosts_from_csv()
@@ -238,8 +237,9 @@ class MultiSSH(plugin.MenuItem):
             if hasattr(search_entry, 'set_placeholder_text'):
                 search_entry.set_placeholder_text("ホスト名またはIPで検索...")
             
+            self.search_text = ""
             model_filter = store.filter_new()
-            model_filter.set_visible_func(self._filter_visible_func, data={"search_text": ""})
+            model_filter.set_visible_func(self._filter_visible_func)
             search_entry.connect("search-changed", self._on_search_changed, model_filter)
             
             vbox.pack_start(search_entry, False, False, 0)
@@ -253,6 +253,8 @@ class MultiSSH(plugin.MenuItem):
             renderer = Gtk.CellRendererText()
             column = Gtk.TreeViewColumn(col_title, renderer, text=i)
             treeview.append_column(column)
+
+        treeview.connect("row-activated", self._on_row_activated, window, search_entry)
 
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -268,6 +270,22 @@ class MultiSSH(plugin.MenuItem):
         vbox.pack_start(default_login_button, False, False, 0)
 
         window.show_all()
+
+    def _on_row_activated(self, treeview, path, column, window, search_entry):
+        model = treeview.get_model()
+        treeiter = model.get_iter(path)
+        if treeiter:
+            host_info = None
+            if isinstance(model, Gtk.TreeModelFilter):
+                child_iter = model.convert_iter_to_child_iter(treeiter)
+                host_info = model.get_model().get_value(child_iter, 2)
+            else:
+                host_info = model.get_value(treeiter, 2)
+            
+            if host_info and self.current_terminal:
+                self._login_to_host(self.current_terminal, host_info, window, search_entry)
+            else:
+                dbg("MultiSSH: Cannot start SSH session, terminal not found.")
 
     def _on_login_button_clicked(self, button, treeview, window, search_entry):
         selection = treeview.get_selection()
@@ -294,7 +312,7 @@ class MultiSSH(plugin.MenuItem):
         else:
             dbg("MultiSSH: Cannot start SSH session, terminal not found.")
 
-    def _wait_for_prompt_and_send_response(self, terminal, host_info, prompt_state, start_time, window, search_entry, timeout_seconds=10):
+    def _wait_for_prompt_and_send_response(self, terminal, vte, host_info, prompt_state, start_time, window, search_entry, timeout_seconds=10):
         prompt_index = prompt_state['index']
 
         if prompt_index >= len(host_info['prompts']):
@@ -312,7 +330,6 @@ class MultiSSH(plugin.MenuItem):
             terminal.multi_ssh_timeout_id = None
             return False
 
-        vte = self._get_vte(terminal)
         text = vte.get_text_range(0, 0, vte.get_column_count(), vte.get_row_count(), None)[0]
         last_line = next((line for line in reversed(text.splitlines()) if line.strip()), "")
         
@@ -323,14 +340,14 @@ class MultiSSH(plugin.MenuItem):
         if search_entry:
             search_entry.set_text("Waiting for prompt: '{}'".format(prompt_text))
 
-        prompt_pattern = re.escape(prompt_text) + r'\s*$'
+        prompt_pattern = re.escape(prompt_text)
         if re.search(prompt_pattern, last_line):
             prompt_state['index'] += 1
             if response_text:
                 dbg("MultiSSH: Prompt '{}' detected on {}. Sending response.".format(prompt_text, terminal.uuid))
                 vte.feed_child("{}\n".format(response_text).encode('utf-8'))
             else:
-                dbg("MultiSSH: Prompt '{}' detected, but response is blank. Skipping.".format(prompt_text))
+                dbg("MultiSSH: Prompt '{}' detected, but response is blank. Skipping.")
         
         return True
 
@@ -360,4 +377,4 @@ class MultiSSH(plugin.MenuItem):
         if host_info.get('prompts'):
             start_time = GObject.get_current_time()
             prompt_state = {'index': 0}
-            terminal.multi_ssh_timeout_id = GObject.timeout_add(500, self._wait_for_prompt_and_send_response, terminal, host_info, prompt_state, start_time, window, search_entry)
+            terminal.multi_ssh_timeout_id = GObject.timeout_add(300, self._wait_for_prompt_and_send_response, terminal, vte, host_info, prompt_state, start_time, window, search_entry)
