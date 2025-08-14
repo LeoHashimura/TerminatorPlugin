@@ -131,25 +131,42 @@ class MultiSSH(plugin.MenuItem):
     def _read_hosts_from_csv(self):
         hosts = []
         plugin_dir = os.path.dirname(__file__)
-        csv_path = os.path.join(plugin_dir, "hosts.csv")
+        primary_csv_path = os.path.join(plugin_dir, "hosts.csv")
+        secondary_csv_path = os.path.join(plugin_dir, "hosts_local.csv")
 
-        if not os.path.exists(csv_path):
-            dbg("MultiSSH: hosts.csv not found at {}. Please create it.".format(csv_path))
-            return hosts
+        for csv_path in [primary_csv_path, secondary_csv_path]:
+            if not os.path.exists(csv_path):
+                dbg("MultiSSH: {} not found, skipping.".format(csv_path))
+                continue
 
-        try:
-            with open(csv_path, 'r') as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    if len(row) >= 3 and (len(row) - 3) % 2 == 0:
-                        host_info = {'hostname': row[0], 'ip_address': row[1], 'username': row[2], 'prompts': []}
-                        for i in range(3, len(row), 2):
-                            host_info['prompts'].append({'prompt': row[i], 'response': row[i+1]})
-                        hosts.append(host_info)
-                    else:
-                        dbg("MultiSSH: CSV syntax error in row: {}. Format: hostname,ip,ID,prompt,resp,...".format(row))
-        except Exception as e:
-            dbg("MultiSSH: Unexpected error reading hosts.csv: {}".format(e))
+            try:
+                with open(csv_path, 'r') as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        if len(row) >= 3:
+                            host_info = {
+                                'hostname': row[0],
+                                'ip_address': row[1],
+                                'protocol': 'ssh', # Default protocol
+                                'username': row[2],
+                                'prompts': []
+                            }
+                            
+                            # Check for optional protocol column
+                            if len(row) > 3 and row[3].lower() in ['ssh', 'telnet']:
+                                host_info['protocol'] = row[3].lower()
+                                prompt_start_index = 4
+                            else:
+                                prompt_start_index = 3
+
+                            for i in range(prompt_start_index, len(row), 2):
+                                if (i + 1) < len(row):
+                                    host_info['prompts'].append({'prompt': row[i], 'response': row[i+1]})
+                            hosts.append(host_info)
+                        else:
+                            dbg("MultiSSH: CSV syntax error in row: {}. Format: hostname,ip,ID,[protocol],prompt,resp,...".format(row))
+            except Exception as e:
+                dbg("MultiSSH: Unexpected error reading {}: {}".format(csv_path, e))
         return hosts
 
     def _get_recent_hosts(self):
@@ -172,9 +189,6 @@ class MultiSSH(plugin.MenuItem):
 
         conf = config.Config()
         plugin_name = self.__class__.__name__
-        plugin_config = conf.plugin_get_config(plugin_name)
-        if not isinstance(plugin_config, dict):
-            plugin_config = {}
         
         recent_hosts = self._get_recent_hosts()
         
@@ -193,9 +207,7 @@ class MultiSSH(plugin.MenuItem):
         recent_hosts.insert(0, new_host_info)
         
         # Keep only the last 5
-        plugin_config['recent_hosts'] = recent_hosts[:5]
-        
-        conf.plugin_set(plugin_name, 'recent_hosts', plugin_config['recent_hosts'])
+        conf.plugin_set(plugin_name, 'recent_hosts', recent_hosts[:5])
         conf.save()
 
     def _filter_visible_func(self, model, treeiter, data):
@@ -224,11 +236,11 @@ class MultiSSH(plugin.MenuItem):
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         window.add(vbox)
 
-        store = Gtk.ListStore(str, str, object)
+        store = Gtk.ListStore(str, str, str, object)
         for host in recent_hosts:
-            store.append([host['hostname'], host['ip_address'], host])
+            store.append([host.get('hostname', ''), host.get('ip_address', ''), host.get('protocol', 'ssh'), host])
         for host in self.hosts_data:
-            store.append([host['hostname'], host['ip_address'], host])
+            store.append([host.get('hostname', ''), host.get('ip_address', ''), host.get('protocol', 'ssh'), host])
 
         tree_model = store
         search_entry = None
@@ -278,9 +290,9 @@ class MultiSSH(plugin.MenuItem):
             host_info = None
             if isinstance(model, Gtk.TreeModelFilter):
                 child_iter = model.convert_iter_to_child_iter(treeiter)
-                host_info = model.get_model().get_value(child_iter, 2)
+                host_info = model.get_model().get_value(child_iter, 3)
             else:
-                host_info = model.get_value(treeiter, 2)
+                host_info = model.get_value(treeiter, 3)
             
             if host_info and self.current_terminal:
                 self._login_to_host(self.current_terminal, host_info, window, search_entry)
@@ -294,9 +306,9 @@ class MultiSSH(plugin.MenuItem):
             host_info = None
             if isinstance(model, Gtk.TreeModelFilter):
                 child_iter = model.convert_iter_to_child_iter(treeiter)
-                host_info = model.get_model().get_value(child_iter, 2)
+                host_info = model.get_model().get_value(child_iter, 3)
             else:
-                host_info = model.get_value(treeiter, 2)
+                host_info = model.get_value(treeiter, 3)
             
             if host_info and self.current_terminal:
                 self._login_to_host(self.current_terminal, host_info, window, search_entry)
@@ -354,10 +366,12 @@ class MultiSSH(plugin.MenuItem):
     def _login_to_host(self, terminal, host_info, window, search_entry):
         if hasattr(terminal, 'multi_ssh_timeout_id') and terminal.multi_ssh_timeout_id:
             GObject.source_remove(terminal.multi_ssh_timeout_id)
-            dbg("MultiSSH: Stopped previous login process on terminal {}.".format(terminal.uuid))
+            dbg("MultiSSH: Stopped previous login process on terminal {}".format(terminal.uuid))
 
-        username = host_info['username']
-        
+        protocol = host_info.get('protocol', 'ssh').lower()
+        username = host_info.get('username')
+        target_address = host_info.get('ip_address') or host_info.get('hostname')
+
         if username == "default":
             default_host_info = self._get_default_host_from_terminator_config()
             username = default_host_info.get('username')
@@ -365,12 +379,20 @@ class MultiSSH(plugin.MenuItem):
                 default_pw = default_host_info['prompts'][0].get('response')
                 host_info['prompts'][0]['response'] = default_pw
 
-        target_address = host_info['ip_address'] or host_info['hostname']
-        ssh_command = "ssh {}@{}\n".format(username, target_address)
+        command = ""
+        if protocol == 'ssh':
+            command = "ssh {}@{}".format(username, target_address)
+        elif protocol == 'telnet':
+            command = "telnet {}".format(target_address)
+        else:
+            dbg("MultiSSH: Unsupported protocol '{}'".format(protocol))
+            if search_entry:
+                search_entry.set_text("Error: Unknown protocol '{}'".format(protocol))
+            return
         
         vte = self._get_vte(terminal)
-        vte.feed_child(ssh_command.encode('utf-8'))
-        dbg("MultiSSH: Issued SSH command to {}.".format(target_address))
+        vte.feed_child("{}\n".format(command).encode('utf-8'))
+        dbg("MultiSSH: Issued command to {}: {}".format(target_address, command))
         
         self._add_to_recent_hosts(host_info)
 

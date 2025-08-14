@@ -1,0 +1,8 @@
+@binding-set terminator-custom-keybindings {
+    bind "F11" { "activate" () };
+}
+
+/* Apply the keybinding to the menu item by its name */
+#keybinding_test_item {
+    -gtk-key-bindings: terminator-custom-keybindings;
+}

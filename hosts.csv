@@ -1,6 +1,6 @@
-host_01.example.com,192.168.1.1,user_01,Password:,pass_01
+openleo,192.168.0.118,Leonard,password:,NismoS13
 host_02.example.com,192.168.1.2,user_02,Password:,pass_02,Verification code:,code_02
-host_03.example.com,192.168.1.3,user_03,Password:,pass_03
+openmedia,192.168.0.118,root,password:,0531,ls -altr,pwd
 host_04.example.com,192.168.1.4,user_04,Password:,pass_04,Verification code:,code_04
 host_05.example.com,192.168.1.5,user_05,Password:,pass_05
 host_06.example.com,192.168.1.6,user_06,Password:,pass_06,Verification code:,code_06
