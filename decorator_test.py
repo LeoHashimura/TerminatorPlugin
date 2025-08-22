@@ -25,7 +25,7 @@ class DecoratorTestPlugin(plugin.Plugin):
         terminator = Terminator()
 
         # Connect to the 'new-window' signal on the top-level Terminator object
-        terminator.connect('new-window', self._on_new_window)
+        terminator.connect('new-window', se 
 
         # For any windows that already exist, manually trigger the setup.
         for window in terminator.windows:

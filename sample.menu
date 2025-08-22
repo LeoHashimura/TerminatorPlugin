@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Menu>
+    <Name>XFCE</Name>
+    
+    <!-- Development Tools -->
+    <Menu>
+        <Name>開発</Name>
+        <Include>
+            <Filename>code.desktop</Filename>
+        </Include>
+        <Include>
+            <Filename>terminator.desktop</Filename>
+        </Include>
+    </Menu>
+    
+    <!-- Office Applications -->
+    <Menu>
+        <Name>オフィス</Name>
+        <Include>
+            <Filename>libreoffice-writer.desktop</Filename>
+        </Include>
+        <Include>
+            <Filename>libreoffice-calc.desktop</Filename>
+        </Include>
+    </Menu>
+
+    <!-- Empty Menu for testing -->
+    <Menu>
+        <Name>空のメニュー</Name>
+    </Menu>
+
+    <!-- Item at root level -->
+    <Include>
+        <Filename>firefox.desktop</Filename>
+    </Include>
+</Menu>
