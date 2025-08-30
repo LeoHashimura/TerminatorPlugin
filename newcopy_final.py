@@ -1,4 +1,4 @@
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GObject
 from terminatorlib import plugin
 from terminatorlib.terminator import Terminator
 from terminatorlib.util import dbg
@@ -13,27 +13,56 @@ class SmartPaste(plugin.MenuItem):
     _text_entry = None
     _prompt_entry = None
     _target_terminal = None
-
+    _windows_accel = set()
+    last_focused = None #  memo:KEY_RETURN = Gdk.KEY_Return
+#KEY_ESCAPE = Gdk.KEY_Escape
     def __init__(self):
         super(SmartPaste, self).__init__()
         self.terminator = Terminator()
-        dbg("SmartPaste: Plugin initialized.")
-
-    def callback(self, menu, menuitems, terminal):
-        item = Gtk.MenuItem.new_with_mnemonic('_Smart Paste')
-        
+        for t in self.terminator.terminals:
+            t.connect("focus-in-event", self._on_terminal_focus)
+            self._setup_accelerator_for_terminal(t)
+            GObject.timeout_add_seconds(2, self._poll_for_new_windows)
+    def _poll_for_new_windows(self):
+        for t in self.terminator.terminals:
+            self._setup_accelerator_for_terminal(t)
+        return True  # Continue polling
+    def _setup_accelerator_for_terminal(self, terminal):
         window = terminal.get_toplevel()
+        if window in self._windows_accel:
+            return
+        self._windows_accel.add(window)
         accel_group = Gtk.AccelGroup()
         window.add_accel_group(accel_group)
-        
         key, mod = Gtk.accelerator_parse("<Primary><Shift>v")
-        item.add_accelerator("activate", accel_group, key, mod, Gtk.AccelFlags.VISIBLE)
+        # Connect the accelerator to a handler that shows the window
+        accel_group.connect(key, mod, Gtk.AccelFlags.VISIBLE, lambda *a: self.on_activate(None, terminal))
+        accel_group.connect(Gdk.KEY_F9, Gdk.ModifierType(0), Gtk.AccelFlags.VISIBLE, lambda *a: self.on_activate(None, terminal))
+    def callback(self, menu, menuitems, terminal):
+        pass
+        # item = Gtk.MenuItem.new_with_mnemonic('_Smart Paste')
         
-        item.connect("activate", self.on_activate, terminal)
-        menu.append(item)
-
+        # window = terminal.get_toplevel()
+        # accel_group = Gtk.AccelGroup()
+        # window.add_accel_group(accel_group)
+        
+        # key, mod = Gtk.accelerator_parse("<Primary><Shift>v")
+        # item.add_accelerator("activate", accel_group, key, mod, Gtk.AccelFlags.VISIBLE)
+        
+        # item.connect("activate", self.on_activate, terminal)
+        # menu.append(item)
+    def _on_new_terminal(self, terminator, terminal):#
+        terminal.connect("focus-in-event", self._on_terminal_focus)#
+        self._setup_accelerator_for_terminal(terminal)#
+    def _on_terminal_focus(self, terminal, event):#
+        for t in self.terminator.terminals:#
+            if t.vte == terminal :#
+                self.last_focused = t#
+                break#
     def get_active_terminal(self):
         """Finds the currently focused terminal."""
+        if self.last_focused:#
+            return self.last_focused#
         for term in self.terminator.terminals:
             if term.vte.is_focus():
                 return term

@@ -3,147 +3,116 @@
 
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GObject, GdkPixbuf, GLib
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 
 import os
-import shutil
 import configparser
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
 # --- 定数定義 ---
-APP_NAME = "XFCEメニューエディタ v2"
+APP_NAME = "XFCEメニュービルダー"
 
-# XDG Base Dirs
+# XDG Dirs
 XDG_CONFIG_HOME = os.environ.get('XDG_CONFIG_HOME', os.path.expanduser('~/.config'))
 XDG_DATA_HOME = os.environ.get('XDG_DATA_HOME', os.path.expanduser('~/.local/share'))
 XDG_DATA_DIRS = os.environ.get('XDG_DATA_DIRS', '/usr/local/share/:/usr/share/').split(':')
 
+# Paths
 USER_MENUS_DIR = os.path.join(XDG_CONFIG_HOME, "menus/")
 USER_MENU_FILE = os.path.join(USER_MENUS_DIR, "xfce-applications.menu")
-SYSTEM_MENU_FILE = "/etc/xdg/menus/xfce-applications.menu" # Fallback for initial creation
-
 APPLICATIONS_DIRS = [os.path.join(d, 'applications') for d in [XDG_DATA_HOME] + XDG_DATA_DIRS]
-DESKTOP_DIRS = [os.path.join(d, 'desktop-directories') for d in [XDG_DATA_HOME] + XDG_DATA_DIRS]
 
-DESKTOP_FILE_TEMPLATE = """[Desktop Entry]
-Version=1.0
-Type=Application
-Name={name}
-Comment=
-Exec={exec}
-Icon={icon}
-Terminal=false
-NoDisplay={nodisplay}
-"""
-
-# --- メインのGUIクラス ---
-class MenuEditorWindow(Gtk.Window):
+# --- Main Application Class ---
+class MenuBuilderWindow(Gtk.Window):
     def __init__(self):
         super().__init__(title=APP_NAME)
-        self.set_default_size(700, 800)
-        self.connect("destroy", self._on_quit)
+        self.set_default_size(800, 600)
+        self.connect("destroy", Gtk.main_quit)
 
-        self._initial_setup()
-
-        # (type, name, icon, command, desktop_file, pixbuf, is_hidden, source_path, foreground)
-        self.treestore = Gtk.TreeStore(str, str, str, str, str, GdkPixbuf.Pixbuf, bool, str, str)
-        self.excluded_files = set()
         self.is_dirty = False
-        
+
         self._create_ui()
-        self._load_menu_data()
-
-    def _set_dirty(self, dirty=True):
-        self.is_dirty = dirty
-
-    def _initial_setup(self):
-        for path in [USER_MENUS_DIR] + [d for d in APPLICATIONS_DIRS] + [d for d in DESKTOP_DIRS]:
-            if not os.path.exists(path):
-                try: os.makedirs(path, exist_ok=True) catch OSError: pass
-
-        if not os.path.exists(USER_MENU_FILE):
-            if os.path.exists(SYSTEM_MENU_FILE):
-                shutil.copy(SYSTEM_MENU_FILE, USER_MENU_FILE)
-            else:
-                ET.ElementTree(ET.Element("Menu", {"Name": "Main Menu"})).write(USER_MENU_FILE, encoding="utf-8", xml_declaration=True)
+        self._populate_available_apps()
 
     def _create_ui(self):
-        main_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.add(main_vbox)
+        # Main Paned Layout
+        hpaned = Gtk.HPaned()
+        self.add(hpaned)
 
-        sw = Gtk.ScrolledWindow()
-        sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        main_vbox.pack_start(sw, True, True, 0)
-
-        self.treeview = Gtk.TreeView(model=self.treestore)
-        sw.add(self.treeview)
-
-        col_icon = Gtk.TreeViewColumn("Icon", Gtk.CellRendererPixbuf(), pixbuf=5)
-        self.treeview.append_column(col_icon)
-        col_name = Gtk.TreeViewColumn("名前", Gtk.CellRendererText(), text=1, foreground=8)
-        self.treeview.append_column(col_name)
-
-        button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin=5)
-        main_vbox.pack_start(button_box, False, False, 0)
-
-        for label, callback in [
-            ("新規メニュー", self._on_new_menu_clicked),
-            ("新規アイテム", self._on_new_item_clicked),
-            ("編集", self._on_edit_clicked),
-        ]:
-            btn = Gtk.Button(label=label)
-            btn.connect("clicked", callback)
-            button_box.pack_start(btn, False, False, 0)
+        # --- Right Pane (Available Apps) ---
+        right_pane_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=5)
+        hpaned.add2(right_pane_vbox)
         
-        self.btn_hide = Gtk.Button(label="非表示")
-        self.btn_hide.connect("clicked", self._on_hide_clicked)
-        button_box.pack_start(self.btn_hide, False, False, 0)
+        right_label = Gtk.Label(label="利用可能なアイテム", xalign=0)
+        right_pane_vbox.pack_start(right_label, False, True, 0)
 
-        for label, callback in [
-            ("削除", self._on_delete_clicked),
-        ]:
-            btn = Gtk.Button(label=label)
-            btn.connect("clicked", callback)
-            button_box.pack_start(btn, False, False, 0)
+        sw_right = Gtk.ScrolledWindow()
+        sw_right.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        right_pane_vbox.pack_start(sw_right, True, True, 0)
 
-        for icon, callback in [
-            ("go-up-symbolic", self._on_move_up_clicked),
-            ("go-down-symbolic", self._on_move_down_clicked),
-        ]:
-            btn = Gtk.Button.new_from_icon_name(icon, Gtk.IconSize.BUTTON)
-            btn.connect("clicked", callback)
-            button_box.pack_start(btn, False, False, 0)
+        # (name, pixbuf, path_or_type)
+        self.available_apps_store = Gtk.ListStore(str, GdkPixbuf.Pixbuf, str)
+        self.available_apps_view = Gtk.TreeView(model=self.available_apps_store)
+        sw_right.add(self.available_apps_view)
 
-        btn_save = Gtk.Button(label="保存")
+        col_icon_right = Gtk.TreeViewColumn("Icon", Gtk.CellRendererPixbuf(), pixbuf=1)
+        self.available_apps_view.append_column(col_icon_right)
+        col_name_right = Gtk.TreeViewColumn("Name", Gtk.CellRendererText(), text=0)
+        self.available_apps_view.append_column(col_name_right)
+
+        # --- Left Pane (Menu in Progress) ---
+        left_pane_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=5)
+        hpaned.add1(left_pane_vbox)
+
+        left_label_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        left_label = Gtk.Label(label="メニュー構造", xalign=0)
+        left_label_box.pack_start(left_label, False, True, 0)
+        
+        self.dirty_indicator = Gtk.Label(label="")
+        left_label_box.pack_end(self.dirty_indicator, False, False, 0)
+        left_pane_vbox.pack_start(left_label_box, False, True, 0)
+
+        sw_left = Gtk.ScrolledWindow()
+        sw_left.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        left_pane_vbox.pack_start(sw_left, True, True, 0)
+
+        # (name, pixbuf, path_or_type, type) -> type is 'menu' or 'item'
+        self.menu_structure_store = Gtk.TreeStore(str, GdkPixbuf.Pixbuf, str, str)
+        self.menu_structure_view = Gtk.TreeView(model=self.menu_structure_store)
+        sw_left.add(self.menu_structure_view)
+        
+        col_icon_left = Gtk.TreeViewColumn("Icon", Gtk.CellRendererPixbuf(), pixbuf=1)
+        self.menu_structure_view.append_column(col_icon_left)
+        col_name_left = Gtk.TreeViewColumn("Name", Gtk.CellRendererText(), text=0)
+        self.menu_structure_view.append_column(col_name_left)
+
+        # Add root item to the left pane
+        pixbuf_root = self._get_icon_pixbuf("folder-open")
+        self.menu_structure_store.append(None, ["メインメニュー", pixbuf_root, "ROOT_MENU", "menu"])
+
+        # --- Bottom Buttons ---
+        button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin=5)
+        left_pane_vbox.pack_start(button_box, False, False, 0)
+
+        btn_delete = Gtk.Button(label="削除")
+        btn_delete.connect("clicked", self._on_delete_clicked)
+        button_box.pack_start(btn_delete, False, False, 0)
+
+        btn_edit = Gtk.Button(label="名前の変更")
+        btn_edit.connect("clicked", self._on_edit_clicked)
+        button_box.pack_start(btn_edit, False, False, 0)
+
+        btn_save = Gtk.Button(label="保存して終了")
         btn_save.connect("clicked", self._on_save_clicked)
         button_box.pack_end(btn_save, False, False, 0)
 
-        btn_reload = Gtk.Button(label="再読み込み")
-        btn_reload.connect("clicked", self._on_reload_clicked)
-        button_box.pack_end(btn_reload, False, False, 0)
+        # --- Drag and Drop Setup ---
+        self.setup_dnd()
 
-        self.treeview.get_selection().connect("changed", self._on_selection_changed)
-
-    def _find_file(self, filename, search_dirs):
-        for directory in search_dirs:
-            path = os.path.join(directory, filename)
-            if os.path.exists(path): return path
-        return None
-
-    def _parse_entry_file(self, filepath):
-        config = configparser.ConfigParser(interpolation=None)
-        config.optionxform = str
-        try:
-            if config.read(filepath, encoding='utf-8'):
-                entry = config['Desktop Entry']
-                return {
-                    'name': entry.get('Name', 'Unnamed'),
-                    'icon': entry.get('Icon', 'application-x-executable'),
-                    'exec': entry.get('Exec', ''),
-                }
-        except Exception: pass
-        return None
+    def set_dirty(self, dirty=True):
+        self.is_dirty = dirty
+        self.dirty_indicator.set_markup("<span foreground='red'>*</span>" if dirty else "")
 
     def _get_icon_pixbuf(self, icon_name, size=Gtk.IconSize.BUTTON):
         if not icon_name: icon_name = "application-x-executable"
@@ -152,222 +121,199 @@ class MenuEditorWindow(Gtk.Window):
         except GLib.Error:
             return Gtk.IconTheme.get_default().load_icon("application-x-executable", size, 0)
 
-    def _load_menu_data(self):
-        self.treestore.clear()
-        self.excluded_files.clear()
-        self._set_dirty(False)
-        try:
-            self.xml_tree = ET.parse(USER_MENU_FILE)
-            xml_root = self.xml_tree.getroot()
-            for node in xml_root.findall("Exclude/Filename"): self.excluded_files.add(node.text)
-            self._populate_tree_recursive(xml_root, None)
-            self.treeview.expand_all()
-        except (ET.ParseError, FileNotFoundError) as e:
-            self._show_error_dialog("メニューファイルの読み込みエラー", str(e))
+    def _populate_available_apps(self):
+        self.available_apps_store.clear()
+        
+        # Add "New Folder"
+        pixbuf_folder = self._get_icon_pixbuf("folder-new")
+        self.available_apps_store.append(["新規フォルダ", pixbuf_folder, "NEW_FOLDER"])
 
-    def _populate_tree_recursive(self, xml_element, parent_iter):
-        for child_node in list(xml_element):
-            if child_node.tag == "Menu":
-                name, icon = self._get_menu_details(child_node)
+        # Scan for apps
+        seen_apps = set()
+        for app_dir in APPLICATIONS_DIRS:
+            if not os.path.isdir(app_dir): continue
+            for filename in os.listdir(app_dir):
+                if filename.endswith(".desktop") and filename not in seen_apps:
+                    seen_apps.add(filename)
+                    parser = configparser.ConfigParser(interpolation=None)
+                    try:
+                        parser.read(os.path.join(app_dir, filename), encoding='utf-8')
+                        if parser.has_option('Desktop Entry', 'NoDisplay') and parser.getboolean('Desktop Entry', 'NoDisplay'):
+                            continue
+                        name = parser.get('Desktop Entry', 'Name', fallback=filename)
+                        icon = parser.get('Desktop Entry', 'Icon', fallback='application-x-executable')
+                        pixbuf = self._get_icon_pixbuf(icon)
+                        self.available_apps_store.append([name, pixbuf, filename])
+                    except Exception:
+                        continue
+
+    def setup_dnd(self):
+        # Right pane (source)
+        self.available_apps_view.enable_model_drag_source(Gdk.ModifierType.BUTTON1_MASK, [], Gdk.DragAction.COPY)
+        self.available_apps_view.drag_source_add_text_targets()
+
+        # Left pane (destination)
+        self.menu_structure_view.enable_model_drag_dest([], Gdk.DragAction.DEFAULT | Gdk.DragAction.MOVE)
+        self.menu_structure_view.drag_dest_add_text_targets()
+        
+        # Left pane (reorder source)
+        self.menu_structure_view.enable_model_drag_source(Gdk.ModifierType.BUTTON1_MASK, [], Gdk.DragAction.MOVE)
+        self.menu_structure_view.drag_source_add_text_targets()
+
+        self.available_apps_view.connect("drag-data-get", self._on_drag_data_get_available)
+        self.menu_structure_view.connect("drag-data-get", self._on_drag_data_get_structure)
+        self.menu_structure_view.connect("drag-data-received", self._on_drag_data_received)
+
+    def _on_drag_data_get_available(self, widget, context, selection, info, timestamp):
+        model, it = widget.get_selection().get_selected()
+        if it:
+            path_or_type = model.get_value(it, 2)
+            selection.set_text(f"NEW:{path_or_type}", -1)
+
+    def _on_drag_data_get_structure(self, widget, context, selection, info, timestamp):
+        model, it = widget.get_selection().get_selected()
+        if it:
+            path = Gtk.TreePath.new_from_iter(it)
+            # Prevent dragging the root
+            if path.get_depth() > 1:
+                selection.set_text(f"MOVE:{path.to_string()}", -1)
+
+    def _on_drag_data_received(self, widget, context, x, y, selection, info, timestamp):
+        data = selection.get_text()
+        if not data: return
+
+        drop_info = widget.get_dest_row_at_pos(x, y)
+        
+        if data.startswith("NEW:"):
+            path_or_type = data[4:]
+            
+            if path_or_type == "NEW_FOLDER":
+                name = "新しいフォルダ"
+                pixbuf = self._get_icon_pixbuf("folder")
+                item_type = "menu"
+            else:
+                # Dropped an app
+                parser = configparser.ConfigParser(interpolation=None)
+                app_path = self._find_desktop_file(path_or_type)
+                if not app_path: return
+                parser.read(app_path, encoding='utf-8')
+                name = parser.get('Desktop Entry', 'Name', fallback=path_or_type)
+                icon = parser.get('Desktop Entry', 'Icon', fallback='application-x-executable')
                 pixbuf = self._get_icon_pixbuf(icon)
-                current_iter = self.treestore.append(parent_iter, ["menu", name, icon, "", "", pixbuf, False, "", "black"])
-                self._populate_tree_recursive(child_node, current_iter)
-            elif child_node.tag == "Include":
-                desktop_file = child_node.findtext("Filename")
-                if desktop_file:
-                    source_path = self._find_file(desktop_file, APPLICATIONS_DIRS)
-                    if source_path:
-                        item_data = self._parse_entry_file(source_path)
-                        if item_data:
-                            is_hidden = desktop_file in self.excluded_files
-                            color = "grey" if is_hidden else "black"
-                            pixbuf = self._get_icon_pixbuf(item_data['icon'])
-                            self.treestore.append(parent_iter, ["item", item_data['name'], item_data['icon'], item_data['exec'], desktop_file, pixbuf, is_hidden, source_path, color])
+                item_type = "item"
 
-    def _get_menu_details(self, menu_node):
-        name, icon = "無名のメニュー", "folder"
-        dir_node = menu_node.find("Directory")
-        if dir_node is not None and dir_node.text:
-            dir_path = self._find_file(dir_node.text, DESKTOP_DIRS)
-            if dir_path:
-                dir_data = self._parse_entry_file(dir_path)
-                if dir_data:
-                    name, icon = dir_data.get('name', name), dir_data.get('icon', icon)
-                menu_node.remove(dir_node)
-                ET.SubElement(menu_node, "Name").text = name
-                ET.SubElement(menu_node, "Icon").text = icon
-                self._set_dirty()
-        else:
-            name, icon = menu_node.findtext("Name", name), menu_node.findtext("Icon", icon)
-        return name, icon
+            parent_iter = None
+            if drop_info:
+                path, pos = drop_info
+                drop_iter = self.menu_structure_store.get_iter(path)
+                if self.menu_structure_store.get_value(drop_iter, 3) == 'menu':
+                    parent_iter = drop_iter
+                else:
+                    parent_iter = self.menu_structure_store.iter_parent(drop_iter)
+            
+            self.menu_structure_store.append(parent_iter, [name, pixbuf, path_or_type, item_type])
+            self.set_dirty()
 
-    def _on_selection_changed(self, selection):
-        model, it = selection.get_selected()
-        if it and model.get_value(it, 0) == 'item':
-            self.btn_hide.set_sensitive(True)
-            is_hidden = model.get_value(it, 6)
-            self.btn_hide.set_label("再表示" if is_hidden else "非表示")
-        else:
-            self.btn_hide.set_sensitive(False)
+        elif data.startswith("MOVE:"):
+            path_str = data[5:]
+            src_path = Gtk.TreePath.new_from_string(path_str)
+            src_iter = self.menu_structure_store.get_iter(src_path)
 
-    def _on_hide_clicked(self, widget):
-        model, it = self.treeview.get_selection().get_selected()
+            if drop_info:
+                path, pos = drop_info
+                dest_iter = self.menu_structure_store.get_iter(path)
+                
+                if self.menu_structure_store.get_value(dest_iter, 3) == 'menu':
+                    self.menu_structure_store.move(src_iter, dest_iter)
+                else:
+                    parent_iter = self.menu_structure_store.iter_parent(dest_iter)
+                    self.menu_structure_store.move(src_iter, parent_iter)
+                self.set_dirty()
+
+    def _find_desktop_file(self, filename):
+        for app_dir in APPLICATIONS_DIRS:
+            path = os.path.join(app_dir, filename)
+            if os.path.exists(path):
+                return path
+        return None
+
+    def _on_delete_clicked(self, widget):
+        model, it = self.menu_structure_view.get_selection().get_selected()
         if not it: return
-        is_hidden = not model.get_value(it, 6)
-        desktop_file = model.get_value(it, 4)
-        model.set(it, 6, is_hidden, 8, "grey" if is_hidden else "black")
-        if is_hidden: self.excluded_files.add(desktop_file) 
-        else: self.excluded_files.discard(desktop_file)
-        self._set_dirty()
-        self._on_selection_changed(self.treeview.get_selection())
-
-    def _on_save_clicked(self, widget):
-        if not self.is_dirty:
-            self._show_info_dialog("情報", "変更点はありません。")
+        # Prevent deleting the root
+        if model.iter_parent(it) is None:
+            self._show_info_dialog("エラー", "ルートメニューは削除できません。")
             return
-        self._save_menu_data()
-        self._set_dirty(False)
-        self._show_info_dialog("成功", "メニューファイルを保存しました。")
-
-    def _on_quit(self, widget, event=None):
-        if self.is_dirty:
-            dialog = Gtk.MessageDialog(transient_for=self, flags=0, message_type=Gtk.MessageType.QUESTION, buttons=Gtk.ButtonsType.YES_NO, text="未保存の変更があります。保存しますか？")
-            dialog.format_secondary_text("保存せずに終了すると、変更は失われます。")
-            response = dialog.run()
-            dialog.destroy()
-            if response == Gtk.ResponseType.YES:
-                self._save_menu_data()
-        Gtk.main_quit()
-
-    def _save_menu_data(self):
-        new_root = ET.Element("Menu")
-        ET.SubElement(new_root, "Name").text = self.xml_tree.getroot().findtext("Name", "XFCE")
-        if self.excluded_files:
-            exclude_root = ET.SubElement(new_root, "Exclude")
-            for filename in sorted(list(self.excluded_files)):
-                ET.SubElement(exclude_root, "Filename").text = filename
-        self._build_xml_recursive(new_root, None)
-        xml_str = ET.tostring(new_root, 'utf-8')
-        reparsed = minidom.parseString(xml_str)
-        pretty_xml_str = reparsed.toprettyxml(indent="  ", newl="
-", encoding="utf-8")
-        try:
-            with open(USER_MENU_FILE, 'wb') as f: f.write(pretty_xml_str)
-        except IOError as e:
-            self._show_error_dialog("保存エラー", f"メニューファイルの保存に失敗しました。
-{e}")
-
-    def _build_xml_recursive(self, xml_parent, parent_iter):
-        child_iter = self.treestore.iter_children(parent_iter)
-        while child_iter:
-            row = self.treestore[child_iter]
-            item_type, name, icon, command, desktop_file, source_path = row[0], row[1], row[2], row[3], row[4], row[7]
-            if item_type == "menu":
-                menu_element = ET.SubElement(xml_parent, "Menu")
-                ET.SubElement(menu_element, "Name").text = name
-                if icon != "folder": ET.SubElement(menu_element, "Icon").text = icon
-                self._build_xml_recursive(menu_element, child_iter)
-            elif item_type == "item":
-                target_path = os.path.join(APPLICATIONS_DIRS[0], desktop_file)
-                if source_path and source_path != target_path and not os.path.exists(target_path):
-                    shutil.copy(source_path, target_path)
-                include_element = ET.SubElement(xml_parent, "Include")
-                ET.SubElement(include_element, "Filename").text = desktop_file
-            child_iter = self.treestore.iter_next(child_iter)
-
-    def _on_reload_clicked(self, widget):
-        if self.is_dirty:
-            dialog = Gtk.MessageDialog(transient_for=self, flags=0, message_type=Gtk.MessageType.QUESTION, buttons=Gtk.ButtonsType.YES_NO, text="未保存の変更があります。リロードしますか？")
-            dialog.format_secondary_text("リロードすると、現在の変更は失われます。")
-            response = dialog.run()
-            dialog.destroy()
-            if response != Gtk.ResponseType.YES: return
-        self._load_menu_data()
-
-    def _on_new_menu_clicked(self, widget):
-        self._show_menu_edit_dialog(is_new=True)
-
-    def _on_new_item_clicked(self, widget):
-        self._show_item_dialog(is_new=True)
+        model.remove(it)
+        self.set_dirty()
 
     def _on_edit_clicked(self, widget):
-        model, it = self.treeview.get_selection().get_selected()
-        if not it: self._show_error_dialog("エラー", "項目が選択されていません。"); return
-        item_type = model.get_value(it, 0)
-        if item_type == "menu": self._show_menu_edit_dialog(is_new=False, model=model, selected_iter=it)
-        elif item_type == "item": self._show_item_dialog(is_new=False, model=model, selected_iter=it)
-
-    def _show_menu_edit_dialog(self, is_new, model=None, selected_iter=None):
-        title = "新規メニュー" if is_new else "メニュー編集"
-        dialog = Gtk.Dialog(title=title, transient_for=self, flags=0, buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK))
-        entry = Gtk.Entry(margin=10, text=model.get_value(selected_iter, 1) if not is_new else "", placeholder_text="メニュー名")
+        model, it = self.menu_structure_view.get_selection().get_selected()
+        if not it: return
+        
+        dialog = Gtk.Dialog(title="名前の変更", transient_for=self, flags=0,
+                              buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK))
+        entry = Gtk.Entry(margin=10, text=model.get_value(it, 0))
         dialog.get_content_area().add(entry)
         dialog.show_all()
         if dialog.run() == Gtk.ResponseType.OK:
-            name = entry.get_text()
-            if name:
-                if is_new:
-                    sel_model, sel_iter = self.treeview.get_selection().get_selected()
-                    parent_iter = sel_model.iter_parent(sel_iter) if sel_iter else None
-                    pixbuf = self._get_icon_pixbuf("folder")
-                    model.append(parent_iter, ["menu", name, "folder", "", "", pixbuf, False, "", "black"])
-                else: model.set(selected_iter, {1: name})
-                self._set_dirty()
+            new_name = entry.get_text()
+            if new_name:
+                model.set_value(it, 0, new_name)
+                self.set_dirty()
         dialog.destroy()
 
-    def _show_item_dialog(self, is_new, model=None, selected_iter=None):
-        title = "新規アイテム" if is_new else "アイテム編集"
-        dialog = Gtk.Dialog(title=title, transient_for=self, flags=0, buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK))
-        grid = Gtk.Grid(column_spacing=10, row_spacing=10, margin=10)
-        dialog.get_content_area().add(grid)
-        entries = {
-            'Name': Gtk.Entry(text=model.get_value(selected_iter, 1) if not is_new else ""),
-            'Exec': Gtk.Entry(text=model.get_value(selected_iter, 3) if not is_new else ""),
-            'Icon': Gtk.Entry(text=model.get_value(selected_iter, 2) if not is_new else ""),
-        }
-        for i, (label, widget) in enumerate(entries.items()):
-            grid.attach(Gtk.Label(label=f"{label}:"), 0, i, 1, 1)
-            grid.attach(widget, 1, i, 1, 1)
-        dialog.show_all()
-        if dialog.run() == Gtk.ResponseType.OK:
-            data = {k: v.get_text() for k, v in entries.items()}
-            if data['Name'] and data['Exec']:
-                if is_new:
-                    sel_model, sel_iter = self.treeview.get_selection().get_selected()
-                    parent_iter = sel_iter if sel_iter and sel_model.get_value(sel_iter, 0) == 'menu' else (sel_model.iter_parent(sel_iter) if sel_iter else None)
-                    desktop_file = f"{data['Name'].lower().replace(' ', '_')}.desktop"
-                    pixbuf = self._get_icon_pixbuf(data['Icon'])
-                    model.append(parent_iter, ["item", data['Name'], data['Icon'], data['Exec'], desktop_file, pixbuf, False, "", "black"])
-                else: model.set(selected_iter, {1: data['Name'], 2: data['Icon'], 3: data['Exec'], 5: self._get_icon_pixbuf(data['Icon'])})
-                self._set_dirty()
-        dialog.destroy()
+    def _on_save_clicked(self, widget):
+        self._save_menu_data()
+        Gtk.main_quit()
 
-    def _on_delete_clicked(self, widget):
-        model, it = self.treeview.get_selection().get_selected()
-        if not it: return
-        dialog = Gtk.MessageDialog(transient_for=self, flags=0, message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.OK_CANCEL, text="本当に削除しますか？")
-        dialog.format_secondary_text("この操作は元に戻せません。")
-        if dialog.run() == Gtk.ResponseType.OK: model.remove(it); self._set_dirty()
-        dialog.destroy()
+    def _save_menu_data(self):
+        if not os.path.exists(USER_MENUS_DIR):
+            os.makedirs(USER_MENUS_DIR, exist_ok=True)
 
-    def _on_move_up_clicked(self, widget):
-        model, it = self.treeview.get_selection().get_selected()
-        if it and model.iter_previous(it):
-            model.move_before(it, model.iter_previous(it)); self._set_dirty()
+        root_iter = self.menu_structure_store.get_iter_first()
+        root_name = self.menu_structure_store.get_value(root_iter, 0)
 
-    def _on_move_down_clicked(self, widget):
-        model, it = self.treeview.get_selection().get_selected()
-        if it and model.iter_next(it):
-            model.move_after(it, model.iter_next(it)); self._set_dirty()
+        new_root = ET.Element("Menu")
+        ET.SubElement(new_root, "Name").text = root_name
+        
+        self._build_xml_recursive(new_root, root_iter)
+        
+        xml_str = ET.tostring(new_root, 'utf-8')
+        reparsed = minidom.parseString(xml_str)
+        pretty_xml_str = reparsed.toprettyxml(indent="  ", newl="\n", encoding="utf-8")
 
-    def _show_error_dialog(self, title, text):
-        dialog = Gtk.MessageDialog(transient_for=self, flags=0, message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.CANCEL, text=title)
-        dialog.format_secondary_text(text)
-        dialog.run()
-        dialog.destroy()
+        try:
+            with open(USER_MENU_FILE, 'wb') as f:
+                f.write(pretty_xml_str)
+            self.set_dirty(False)
+        except IOError as e:
+            self._show_info_dialog("保存エラー", f"メニューファイルの保存に失敗しました。\n{e}")
+
+    def _build_xml_recursive(self, xml_parent, parent_iter):
+        child_iter = self.menu_structure_store.iter_children(parent_iter)
+        while child_iter:
+            row = self.menu_structure_store[child_iter]
+            name, path_or_type, item_type = row[0], row[2], row[3]
+
+            if item_type == "menu":
+                menu_element = ET.SubElement(xml_parent, "Menu")
+                ET.SubElement(menu_element, "Name").text = name
+                self._build_xml_recursive(menu_element, child_iter)
+            elif item_type == "item":
+                include_element = ET.SubElement(xml_parent, "Include")
+                ET.SubElement(include_element, "Filename").text = path_or_type
+            
+            child_iter = self.menu_structure_store.iter_next(child_iter)
 
     def _show_info_dialog(self, title, text):
-        dialog = Gtk.MessageDialog(transient_for=self, flags=0, message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.OK, text=title)
+        dialog = Gtk.MessageDialog(transient_for=self, flags=0, message_type=Gtk.MessageType.INFO,
+                                   buttons=Gtk.ButtonsType.OK, text=title)
         dialog.format_secondary_text(text)
         dialog.run()
         dialog.destroy()
+
+if __name__ == "__main__":
+    win = MenuBuilderWindow()
+    win.show_all()
+    Gtk.main()
